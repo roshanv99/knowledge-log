@@ -60,7 +60,10 @@ services:
     environment:
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change_me_in_production}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
-      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      # 127.0.0.1 is always appended: the container healthcheck below hits the app over
+      # loopback, and Django's ALLOWED_HOSTS check would 400 that request otherwise. Safe to
+      # always allow — 127.0.0.1 is only reachable from inside this container, never published.
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost},127.0.0.1
       DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       POSTGRES_HOST: postgres
