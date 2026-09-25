@@ -63,7 +63,7 @@ server {
   # has no Google session, it authenticates with its own token. Matches every path the
   # runner calls (backend/pipeline/urls.py) and nothing the web app calls under its own
   # login (status/requests/retry stay behind SSO via the generic /api/ location below).
-  location ~ ^/api/pipeline/(wanted|runs(/\d+/(claim|finish))?|tasks/\d+/(heartbeat|notes|complete|fail|media))$ {
+  location ~ ^/api/pipeline/(wanted|runs(/\d+/(claim|finish))?|tasks/\d+/(heartbeat|notes|complete|fail|media)|notes/sync)$ {
     # A reel upload can take a while over a home connection.
     proxy_read_timeout 300s;
     proxy_send_timeout 300s;

@@ -16,6 +16,11 @@ class Document(models.Model):
     # Highest page N such that every page 1..N is in a finished chunk.
     last_processed_page = models.IntegerField(default=0)
     created_at = models.DateTimeField(default=timezone.now)
+    # Set by the pipeline's notes-sync report (pipeline/services.py::sync_notes), not computed
+    # live here — the backend and the notes folder are on different machines once deployed.
+    # Defaults true so a document looks normal until the pipeline's first sync says otherwise.
+    available = models.BooleanField(default=True)
+    folder = models.CharField(max_length=500, blank=True, default="")
 
     class Meta:
         db_table = "documents"

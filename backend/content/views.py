@@ -16,8 +16,9 @@ from rest_framework.response import Response
 
 from config.storage import get_storage
 from content.models import Document, NoteScope, Question, Reel, ReelView
-from content.notes import Note, progress, questions_in_scope, reels_in_scope, scope_for, sync_notes_folder
+from content.notes import Note, list_notes, progress, questions_in_scope, reels_in_scope, scope_for
 from quiz import activity
+from quiz.models import Settings
 from quiz.services import rebuild_todays_set
 
 QUIZ_FIELDS = {"selected", "page_from", "page_to", "include_quiz"}
@@ -60,7 +61,7 @@ def _notes_list(params: dict | None = None) -> dict:
     """Manage notes, in pipeline order. With `page`, only that page is returned (and only its
     progress is computed), filtered by name, folder and selection; without it, every PDF."""
     params = params or {}
-    everything = sync_notes_folder()
+    everything = list_notes()
     available = [n for n in everything if n.available]
     ready = questions_in_scope(Question.objects.filter(chunk__document__in=[n.document for n in available]))
     summary = {"documents": len(everything), "selected": sum(n.scope.selected for n in available),
@@ -84,7 +85,7 @@ def _notes_list(params: dict | None = None) -> dict:
     # Where each PDF sits in the pipeline order (only PDFs on disk take part), for reordering.
     position = {n.document.pk: i for i, n in enumerate(available)}
     return {
-        "notes_dir": str(settings.KL_NOTES_DIR).replace(str(Path.home()), "~", 1),
+        "notes_dir": Settings.load().notes_dir_reported or str(settings.KL_NOTES_DIR).replace(str(Path.home()), "~", 1),
         "notes": [{**_note_data(n), "position": position.get(n.document.pk)} for n in items],
         "total": len(shown),
         "page": page or 1,
@@ -130,7 +131,7 @@ def update_scope(request: Request, document_id: int) -> Response:
         scope.save()
         quiz = rebuild_todays_set() if QUIZ_FIELDS & changes.keys() else None
 
-    note = next(n for n in sync_notes_folder() if n.document.pk == document.pk)
+    note = next(n for n in list_notes() if n.document.pk == document.pk)
     return Response({"note": _note_data(note), "todays_quiz": quiz})
 
 
@@ -144,7 +145,7 @@ def move(request: Request, document_id: int) -> Response:
     Every PDF's priority is rewritten to its new index, so the order stays dense."""
     payload = PositionInput(data=request.data)
     payload.is_valid(raise_exception=True)
-    order = [n.document for n in sync_notes_folder() if n.available]
+    order = [n.document for n in list_notes() if n.available]
     document = next((d for d in order if d.pk == document_id), None)
     if document is None:
         return Response({"detail": "Only PDFs in the notes folder can be reordered."},

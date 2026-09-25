@@ -1,28 +1,39 @@
-import pypdf
+import hashlib
+
 import pytest
 from rest_framework.test import APIClient
 
 from content.models import Chunk, Document, GenerationTask, NoteScope, Question
+from pipeline.tests.test_api import API, runner_client
 from quiz.models import QuizAttempt, QuizSet
 
 pytestmark = pytest.mark.django_db
 
 
-def write_pdf(path, pages: int) -> None:
-    writer = pypdf.PdfWriter()
-    for _ in range(pages):
-        writer.add_blank_page(width=200, height=200)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as f:
-        writer.write(f)
+def entry(path: str, pages: int, folder: str = "") -> dict:
+    """A pipeline notes-sync report entry. `path` only needs to be a stable, unique string here
+    (no real file is read server-side any more) — its hash is derived from it directly."""
+    return {"path": path, "filename": path.rsplit("/", 1)[-1],
+            "file_hash": hashlib.sha256(path.encode()).hexdigest(),
+            "size": pages * 137, "mtime": 1.0, "page_count": pages, "folder": folder}
+
+
+def sync(client: APIClient, entries: list[dict], notes_dir: str = "~/Documents/Notes"):
+    """A full-state sync report, as the pipeline sends it — every call reports every PDF
+    currently on disk; anything omitted is marked unavailable."""
+    response = client.post(f"{API}/notes/sync", {"notes_dir": notes_dir, "documents": entries}, format="json")
+    assert response.status_code == 200, response.data
+    return response.data
 
 
 @pytest.fixture
-def notes_dir(tmp_path, settings):
-    settings.KL_NOTES_DIR = tmp_path
-    write_pdf(tmp_path / "Tech" / "Redis.pdf", 12)
-    write_pdf(tmp_path / "Tech" / "NGINX.pdf", 5)
-    return tmp_path
+def notes_dir():
+    """Registers Redis.pdf and NGINX.pdf. NGINX is sent first so Redis — processed last, same
+    as the real pipeline's sorted-path walk where "Redis.pdf" sorts after "NGINX.pdf" — ends up
+    on top ("each new PDF goes on top" — content/notes.py::apply_sync_report)."""
+    client = runner_client("kl@test")
+    sync(client, [entry("/notes/Tech/NGINX.pdf", 5, "Tech"), entry("/notes/Tech/Redis.pdf", 12, "Tech")])
+    return client
 
 
 def add_questions(document: Document, pages: list[list[int]]) -> None:
@@ -35,26 +46,40 @@ def add_questions(document: Document, pages: list[list[int]]) -> None:
 
 def test_lists_every_pdf_in_the_folder_with_defaults(notes_dir):
     data = APIClient().get("/api/notes").data["notes"]
-    # Each new PDF goes on top, so the last one found is listed first.
     assert [(n["filename"], n["folder"], n["page_count"]) for n in data] == [("Redis.pdf", "Tech", 12),
                                                                               ("NGINX.pdf", "Tech", 5)]
     assert data[0]["scope"] == {"selected": True, "page_from": 1, "page_to": 12,
                                 "include_quiz": True, "include_reels": True, "priority": -1}
-    # Rescanning an unchanged folder creates nothing new.
-    APIClient().get("/api/notes")
+    # Re-syncing the same report creates nothing new.
+    sync(notes_dir, [entry("/notes/Tech/NGINX.pdf", 5, "Tech"), entry("/notes/Tech/Redis.pdf", 12, "Tech")])
     assert Document.objects.count() == 2 and NoteScope.objects.count() == 2
 
 
 def test_missing_pdf_is_listed_as_unavailable(notes_dir):
-    APIClient().get("/api/notes")
-    (notes_dir / "Tech" / "NGINX.pdf").unlink()
+    sync(notes_dir, [entry("/notes/Tech/Redis.pdf", 12, "Tech")])  # NGINX no longer reported
     data = APIClient().get("/api/notes").data["notes"]
     assert [(n["filename"], n["available"]) for n in data] == [("Redis.pdf", True), ("NGINX.pdf", False)]
 
 
+def test_sync_needs_a_valid_runner_token():
+    assert APIClient().post(f"{API}/notes/sync", {"notes_dir": "~", "documents": []},
+                            format="json").status_code in (401, 403)
+
+
+def test_renamed_file_is_recognised_by_content_not_path(notes_dir):
+    """Same file_hash, different path/filename: the existing Document is updated in place,
+    not duplicated — a moved or renamed PDF stays the same document."""
+    redis = Document.objects.get(filename="Redis.pdf")
+    moved = entry("/notes/Archive/Redis-2024.pdf", 12, "Archive")
+    moved["file_hash"] = redis.file_hash
+    sync(notes_dir, [entry("/notes/Tech/NGINX.pdf", 5, "Tech"), moved])
+    redis.refresh_from_db()
+    assert redis.filename == "Redis-2024.pdf" and redis.folder == "Archive" and redis.available
+    assert Document.objects.count() == 2  # still just Redis + NGINX, nothing duplicated
+
+
 def test_scope_update_counts_items_in_range(notes_dir):
     client = APIClient()
-    client.get("/api/notes")
     redis = Document.objects.get(filename="Redis.pdf")
     add_questions(redis, [[1], [2, 3], [8], [11, 12]])
 
@@ -71,7 +96,6 @@ def test_scope_update_counts_items_in_range(notes_dir):
 
 def test_scope_rejects_bad_ranges(notes_dir):
     client = APIClient()
-    client.get("/api/notes")
     redis = Document.objects.get(filename="Redis.pdf")
     assert client.patch(f"/api/notes/{redis.pk}", {"page_from": 9, "page_to": 3}, format="json").status_code == 400
     assert client.patch(f"/api/notes/{redis.pk}", {"page_to": 13}, format="json").status_code == 400
@@ -79,7 +103,6 @@ def test_scope_rejects_bad_ranges(notes_dir):
 
 def test_reels_toggle_leaves_todays_quiz_alone(notes_dir):
     client = APIClient()
-    client.get("/api/notes")
     redis = Document.objects.get(filename="Redis.pdf")
     response = client.patch(f"/api/notes/{redis.pk}", {"include_reels": False}, format="json")
     assert response.data["todays_quiz"] is None
@@ -87,7 +110,6 @@ def test_reels_toggle_leaves_todays_quiz_alone(notes_dir):
 
 def test_started_quiz_is_not_rebuilt(notes_dir):
     client = APIClient()
-    client.get("/api/notes")
     redis = Document.objects.get(filename="Redis.pdf")
     add_questions(redis, [[1], [2]])
     quiz_set = client.get("/api/quiz/today").data["quiz_set"]
@@ -99,7 +121,6 @@ def test_started_quiz_is_not_rebuilt(notes_dir):
 
 def test_items_report_their_pages(notes_dir):
     client = APIClient()
-    client.get("/api/notes")
     redis = Document.objects.get(filename="Redis.pdf")
     add_questions(redis, [[4, 5]])
     items = client.get(f"/api/notes/{redis.pk}/items").data
@@ -115,7 +136,6 @@ def test_progress_per_kind_and_manage_notes_order(notes_dir):
     from content.models import GenerationRun
 
     client = APIClient()
-    client.get("/api/notes")
     redis = Document.objects.get(filename="Redis.pdf")
     NoteScope.objects.filter(document=redis).update(page_from=3, page_to=10)
     run = GenerationRun.objects.create(kind="quiz", runner="test")
@@ -147,37 +167,38 @@ def test_progress_per_kind_and_manage_notes_order(notes_dir):
     assert client.put(f"/api/notes/{redis.pk}/position", {"position": -1}, format="json").status_code == 400
 
 
-def test_paginated_filtered_list(tmp_path, settings):
-    settings.KL_NOTES_DIR = tmp_path
-    pages = iter(range(2, 20))  # distinct page counts, so no two files have the same content
-    for folder, names in {"Tech": ["Redis", "NGINX", "Docker", "Kafka"], "Maths": ["Algebra", "Graphs"]}.items():
-        for name in names:
-            write_pdf(tmp_path / folder / f"{name}.pdf", next(pages))
-    client = APIClient()
-    client.get("/api/notes")  # found in path order, each new PDF going on top
-    assert [n["filename"] for n in client.get("/api/notes").data["notes"]] == [
+def test_paginated_filtered_list():
+    client = runner_client("kl@test")
+    # In the pipeline's real sorted-path processing order — each new PDF goes on top, so the
+    # last one synced (Redis) ends up first.
+    entries = [entry("/notes/Maths/Algebra.pdf", 2, "Maths"), entry("/notes/Maths/Graphs.pdf", 3, "Maths"),
+               entry("/notes/Tech/Docker.pdf", 4, "Tech"), entry("/notes/Tech/Kafka.pdf", 5, "Tech"),
+               entry("/notes/Tech/NGINX.pdf", 6, "Tech"), entry("/notes/Tech/Redis.pdf", 7, "Tech")]
+    sync(client, entries)
+    app = APIClient()
+    assert [n["filename"] for n in app.get("/api/notes").data["notes"]] == [
         "Redis.pdf", "NGINX.pdf", "Kafka.pdf", "Docker.pdf", "Graphs.pdf", "Algebra.pdf"]
     NoteScope.objects.filter(document__filename__in=["Kafka.pdf", "Graphs.pdf"]).update(selected=False)
 
-    page = client.get("/api/notes", {"page": 2, "page_size": 4}).data
+    page = app.get("/api/notes", {"page": 2, "page_size": 4}).data
     assert [n["filename"] for n in page["notes"]] == ["Graphs.pdf", "Algebra.pdf"]
     assert (page["total"], page["page"], page["page_size"]) == (6, 2, 4)
     assert page["folders"] == ["Maths", "Tech"]
     assert page["summary"] == {"documents": 6, "selected": 4, "questions_ready": 0}
     assert page["notes"][0]["position"] == 4
-    assert client.get("/api/notes", {"page": 9, "page_size": 4}).data["page"] == 2  # clamped to the last page
+    assert app.get("/api/notes", {"page": 9, "page_size": 4}).data["page"] == 2  # clamped to the last page
 
     def names(**params):
-        return [n["filename"] for n in client.get("/api/notes", {"page": 1, **params}).data["notes"]]
+        return [n["filename"] for n in app.get("/api/notes", {"page": 1, **params}).data["notes"]]
     assert names(q="gr") == ["Graphs.pdf"]
     assert names(folder="Tech") == ["Redis.pdf", "NGINX.pdf", "Kafka.pdf", "Docker.pdf"]
     assert names(selected="no") == ["Kafka.pdf", "Graphs.pdf"]
     assert names(folder="Tech", selected="yes", q="r") == ["Redis.pdf", "Docker.pdf"]
-    assert client.get("/api/notes", {"page": 1, "selected": "maybe"}).status_code == 400
-    assert client.get("/api/notes", {"page": 1, "page_size": 500}).status_code == 400
+    assert app.get("/api/notes", {"page": 1, "selected": "maybe"}).status_code == 400
+    assert app.get("/api/notes", {"page": 1, "page_size": 500}).status_code == 400
 
     # A PDF added after reordering still goes on top.
-    client.put(f"/api/notes/{Document.objects.get(filename='Algebra.pdf').pk}/position", {"position": 0},
-               format="json")
-    write_pdf(tmp_path / "Maths" / "Calculus.pdf", 25)
+    app.put(f"/api/notes/{Document.objects.get(filename='Algebra.pdf').pk}/position", {"position": 0},
+             format="json")
+    sync(client, entries + [entry("/notes/Maths/Calculus.pdf", 8, "Maths")])
     assert names(page_size=100)[:2] == ["Calculus.pdf", "Algebra.pdf"]

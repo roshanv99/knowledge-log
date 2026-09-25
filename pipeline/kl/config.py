@@ -16,6 +16,7 @@ class Settings:
     work_dir: Path  # the step engine's loop state and briefs (.kl/)
     logs_dir: Path
     prompts_dir: Path
+    notes_dir: Path  # PDFs live here; see kl/notes_sync.py and content/notes.py
     api_base: str
     runner_token: str | None
     claude_bin: str
@@ -31,6 +32,7 @@ def load_settings() -> Settings:
         work_dir=Path(env("KL_WORK_DIR", PROJECT_ROOT / ".kl")),
         logs_dir=Path(env("KL_LOGS_DIR", PROJECT_ROOT / "logs")),
         prompts_dir=Path(env("KL_PROMPTS_DIR", PROJECT_ROOT / "plugin/knowledge-log/prompts")),
+        notes_dir=Path(env("KL_NOTES_DIR", Path.home() / "Documents" / "Notes")).expanduser(),
         api_base=env("KL_API_BASE", "http://localhost:8010/api"),
         runner_token=env("KL_RUNNER_TOKEN") or None,
         claude_bin=env("KL_CLAUDE_BIN", "claude"),

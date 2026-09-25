@@ -146,6 +146,15 @@ def fail(request: Request, task_id: int) -> Response:
 
 
 @runner_endpoint(["POST"])
+def sync_notes(request: Request) -> Response:
+    """Every PDF the pipeline currently finds under its KL_NOTES_DIR (content/notes.py,
+    docs/PLAN.md's deployment note on why this can't be discovered on the server itself)."""
+    data = _valid(s.NotesSyncInput, request)
+    result = services.sync_notes(data["documents"], data["notes_dir"])
+    return Response(result)
+
+
+@runner_endpoint(["POST"])
 def finish(request: Request, run_id: int) -> Response:
     run = _own_run(request, run_id)
     data = _valid(s.FinishInput, request)

@@ -77,6 +77,9 @@ class Settings(models.Model):
     # Daily goals for the tracker on the Quiz page.
     daily_questions_goal = models.IntegerField(default=10, validators=[MinValueValidator(1), MaxValueValidator(500)])
     daily_reels_goal = models.IntegerField(default=1, validators=[MinValueValidator(1), MaxValueValidator(100)])
+    # The pipeline's last-reported notes folder root (e.g. "~/Documents/Notes"), for display —
+    # KL_NOTES_DIR on the backend itself is meaningless once it's deployed away from that folder.
+    notes_dir_reported = models.CharField(max_length=500, blank=True, default="")
 
     class Meta:
         db_table = "settings"

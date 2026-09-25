@@ -13,6 +13,7 @@ urlpatterns = [
     path("pipeline/tasks/<int:task_id>/complete", views.complete),
     path("pipeline/tasks/<int:task_id>/fail", views.fail),
     path("pipeline/tasks/<int:task_id>/media", views.media),
+    path("pipeline/notes/sync", views.sync_notes),
     # Manage notes.
     path("pipeline/status", views.pipeline_status),
     path("pipeline/requests", views.request_run),

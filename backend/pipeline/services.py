@@ -15,6 +15,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from config.storage import get_storage
+from content import notes as notes_module
 from content.models import Chunk, Document, GenerationRun, GenerationTask, Kind, Question, Reel
 from pipeline import planner
 from pipeline.models import RunRequest
@@ -310,6 +311,18 @@ def wanted(kind: str) -> dict | None:
     return {"kind": kind, "reason": "run_request" if request else "schedule",
             "request_id": request.pk if request else None,
             "document": plan.document.filename, "pages": list(plan.page_range)}
+
+
+def sync_notes(entries: list[dict], notes_dir: str) -> dict:
+    """What the pipeline's `kl notes sync` (or a runner poll) reports: every PDF currently
+    under its KL_NOTES_DIR. See content/notes.py::apply_sync_report for the registration and
+    availability logic this just wraps with the display-string update."""
+    result = notes_module.apply_sync_report(entries)
+    prefs = Settings.load()
+    if notes_dir and prefs.notes_dir_reported != notes_dir:
+        prefs.notes_dir_reported = notes_dir
+        prefs.save(update_fields=["notes_dir_reported"])
+    return result
 
 
 def request_run(kind: str, requested_by: str = "app") -> RunRequest:

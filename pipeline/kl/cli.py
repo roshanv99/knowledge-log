@@ -9,6 +9,8 @@ does the reading, writing and reviewing, and this CLI does everything else.
     kl reel start|status|render|fail|stop   the manim reel engine (needs the `reels` extra)
     kl reel submit script|script-review|visual FILE
     kl runner poll [--dry-run]              launchd: start a session per kind only if work is wanted
+                                             (also reports the notes folder — see kl notes sync)
+    kl notes sync                           report every PDF under KL_NOTES_DIR to the app
     kl docs / kl status                     what's selected in Manage notes / pipeline activity
 """
 
@@ -18,18 +20,20 @@ from typing import Annotated
 
 import typer
 
-from kl import runner
+from kl import notes_sync, runner
 from kl.api import ApiError, HttpApi
-from kl.config import load_settings
+from kl.config import Settings, load_settings
 from kl.engine import Engine, EngineError
 
 app = typer.Typer(no_args_is_help=True, help="knowledge-log content pipeline")
 mcq = typer.Typer(no_args_is_help=True, help="The MCQ step engine")
 reel = typer.Typer(no_args_is_help=True, help="The manim reel step engine")
 runner_app = typer.Typer(no_args_is_help=True, help="The launchd runner")
+notes_app = typer.Typer(no_args_is_help=True, help="The notes folder")
 app.add_typer(mcq, name="mcq")
 app.add_typer(reel, name="reel")
 app.add_typer(runner_app, name="runner")
+app.add_typer(notes_app, name="notes")
 
 
 class Step(str, Enum):
@@ -59,6 +63,20 @@ def _reel_engine():
     from kl.reels.engine import ReelEngine
     s = load_settings()
     return ReelEngine(s, _api(s), s.work_dir)
+
+
+def _sync_notes(s: Settings) -> str:
+    """Report every PDF under KL_NOTES_DIR so the app's Manage Notes reflects what's really on
+    disk (content/notes.py) — the app itself can no longer see this once deployed away from
+    this folder. Never raises: a sync failure shouldn't stop `runner poll` from still checking
+    whether work is wanted."""
+    try:
+        entries = notes_sync.scan(s.notes_dir)
+        result = _api(s).sync_notes(entries, str(s.notes_dir))
+        return (f"notes: synced {len(entries)} PDF(s) "
+                f"({result['available']} available, {result['went_unavailable']} no longer found).")
+    except ApiError as e:
+        return f"notes: sync failed ({e}) — continuing without it."
 
 
 def _run(action) -> None:
@@ -190,7 +208,14 @@ def runner_poll(
     """Start a Claude Code session per kind the app wants a run for. Costs nothing when idle."""
     s = load_settings()
     kinds = kind or list(runner.KINDS)
-    _run(lambda: "\n".join(runner.poll(s, _api(s), k, dry_run=dry_run) for k in kinds))
+    _run(lambda: "\n".join([_sync_notes(s)] + [runner.poll(s, _api(s), k, dry_run=dry_run) for k in kinds]))
+
+
+@notes_app.command("sync")
+def notes_sync_cmd() -> None:
+    """Report every PDF under KL_NOTES_DIR to the app (also runs automatically on every
+    `runner poll`; this is for triggering it manually)."""
+    _run(lambda: _sync_notes(load_settings()))
 
 
 @app.command()

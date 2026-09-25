@@ -3,14 +3,16 @@
 Every PDF under KL_NOTES_DIR gets a Document (created here if the pipeline hasn't seen it
 yet) and a NoteScope. A question or reel is in scope when its PDF is selected, its type is
 ticked, and every page it comes from lies inside the chosen range.
+
+Which PDFs currently exist is no longer discovered by scanning a filesystem here: the backend
+and the notes folder aren't necessarily on the same machine once deployed (deploy/HOSTINGER.md).
+The pipeline (which does have real folder access — pipeline/kl/notes_sync.py) reports what it
+finds to `apply_sync_report()` below, called from POST /api/pipeline/notes/sync
+(pipeline/services.py::sync_notes). `list_notes()` here just reads what was last reported.
 """
 
-import hashlib
 from dataclasses import dataclass
-from pathlib import Path
 
-import pypdf
-from django.conf import settings
 from django.db.models import QuerySet
 from django.utils import timezone
 
@@ -25,14 +27,6 @@ class Note:
     folder: str
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def scope_for(document: Document) -> NoteScope:
     """The document's scope, or the default (everything on) if none is saved yet."""
     try:
@@ -41,36 +35,52 @@ def scope_for(document: Document) -> NoteScope:
         return NoteScope(document=document)
 
 
-def sync_notes_folder() -> list[Note]:
-    """Register every PDF in the notes folder; list them, then known PDFs no longer on disk."""
-    root = Path(settings.KL_NOTES_DIR).expanduser()
-    notes, seen = [], set()
-    for path in sorted(root.rglob("*.pdf")) if root.is_dir() else []:
-        stat = path.stat()
+def apply_sync_report(entries: list[dict]) -> dict:
+    """Register/update every PDF the pipeline reports, then mark anything not reported as no
+    longer available. `entries`: [{path, filename, file_hash, size, mtime, page_count, folder}].
+
+    Same identification rule as before: a PDF's identity is its content hash, not its path, so
+    a renamed/moved file is recognised as the same document rather than duplicated."""
+    seen = set()
+    registered = 0
+    for entry in entries:
         scope = (NoteScope.objects.select_related("document")
-                 .filter(document__path=str(path), file_size=stat.st_size, file_mtime=stat.st_mtime).first())
+                 .filter(document__path=entry["path"], file_size=entry["size"], file_mtime=entry["mtime"]).first())
         if scope is None:  # new or changed file: identify it by content
-            file_hash = _sha256(path)
-            document = Document.objects.filter(file_hash=file_hash).first()
+            document = Document.objects.filter(file_hash=entry["file_hash"]).first()
             if document is None:
-                document = Document.objects.create(file_hash=file_hash, path=str(path), filename=path.name,
-                                                   page_count=len(pypdf.PdfReader(path).pages))
-            elif document.path != str(path) or document.filename != path.name:
-                document.path, document.filename = str(path), path.name
+                document = Document.objects.create(file_hash=entry["file_hash"], path=entry["path"],
+                                                   filename=entry["filename"], page_count=entry["page_count"])
+                registered += 1
+            elif document.path != entry["path"] or document.filename != entry["filename"]:
+                document.path, document.filename = entry["path"], entry["filename"]
                 document.save(update_fields=["path", "filename"])
             # A new PDF goes to the top of Manage notes, which is the end of the pipeline's queue.
             first = NoteScope.objects.order_by("priority").values_list("priority", flat=True).first()
             scope, _ = NoteScope.objects.get_or_create(
                 document=document, defaults={"priority": 0 if first is None else first - 1})
-            scope.file_size, scope.file_mtime = stat.st_size, stat.st_mtime
+            scope.file_size, scope.file_mtime = entry["size"], entry["mtime"]
             scope.save(update_fields=["file_size", "file_mtime", "updated_at"])
-        seen.add(scope.document_id)
-        notes.append(Note(scope.document, scope, True, str(path.parent.relative_to(root))))
+        document = scope.document
+        if not document.available or document.folder != entry["folder"]:
+            document.available, document.folder = True, entry["folder"]
+            document.save(update_fields=["available", "folder"])
+        seen.add(document.pk)
 
-    notes.sort(key=lambda n: list_order(n.document, n.scope))
-    for document in Document.objects.exclude(pk__in=seen).order_by("filename"):
-        notes.append(Note(document, scope_for(document), False, ""))
-    return notes
+    unavailable = Document.objects.exclude(pk__in=seen).filter(available=True)
+    went_unavailable = unavailable.count()
+    unavailable.update(available=False)
+    return {"registered": registered, "available": len(seen), "went_unavailable": went_unavailable}
+
+
+def list_notes() -> list[Note]:
+    """Every known PDF, in pipeline order, from the last sync report — not a live scan.
+    Available PDFs first (pipeline order), then ones no longer reported, by filename."""
+    documents = list(Document.objects.select_related("scope"))
+    notes = [Note(d, scope_for(d), d.available, d.folder) for d in documents]
+    available = sorted((n for n in notes if n.available), key=lambda n: list_order(n.document, n.scope))
+    gone = sorted((n for n in notes if not n.available), key=lambda n: n.document.filename)
+    return available + gone
 
 
 def _ranges(pages: set[int]) -> list[list[int]]:
