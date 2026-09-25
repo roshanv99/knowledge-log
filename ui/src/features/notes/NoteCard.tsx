@@ -1,7 +1,7 @@
-import { CaretDownIcon } from '@phosphor-icons/react'
+import { CaretDownIcon, TrashIcon } from '@phosphor-icons/react'
 import { type ReactNode, useId, useState } from 'react'
 
-import { useNoteItems, useRetryTask, useUpdateScope } from '../../api/hooks'
+import { useNoteItems, useRemoveNoteFile, useRetryTask, useUpdateScope } from '../../api/hooks'
 import type { ContentKind, Note, NoteScope, TodaysQuizOutcome } from '../../api/types'
 import { Checkbox } from '../../components/Checkbox'
 import { type Coverage, PageRange } from '../../components/PageRange'
@@ -30,6 +30,8 @@ export function NoteCard({
 }) {
   const bodyId = useId()
   const update = useUpdateScope(note.id)
+  const remove = useRemoveNoteFile()
+  const [confirming, setConfirming] = useState(false)
   const { scope } = note
   // Local copy of the range so the slider moves smoothly; it's saved when released.
   const [range, setRange] = useState<[number, number]>([scope.page_from, scope.page_to])
@@ -50,7 +52,7 @@ export function NoteCard({
   const active = note.available && scope.selected
   const where = note.folder ? `${note.folder} · ` : ''
   const meta = !note.available
-    ? 'This PDF is no longer in your notes folder.'
+    ? 'Removed. Upload this PDF again to use it; its questions and reels are kept.'
     : !scope.selected
       ? `${where}${note.page_count} pages. Not used for quizzes or reels.`
       : `${where}${note.page_count} pages.`
@@ -90,6 +92,18 @@ export function NoteCard({
         </div>
         <div className="-mt-1 -mr-2 flex shrink-0 items-center">
           {handle}
+          {note.available && (
+            <button
+              type="button"
+              aria-label={`Remove ${documentName(note.filename)}`}
+              title="Remove this PDF"
+              aria-expanded={confirming}
+              onClick={() => setConfirming((c) => !c)}
+              className="grid size-11 place-items-center rounded-xl text-muted transition hover:bg-pen-soft hover:text-pen"
+            >
+              <TrashIcon weight="bold" className="size-5" aria-hidden />
+            </button>
+          )}
           {active && (
             <button
               type="button"
@@ -108,6 +122,39 @@ export function NoteCard({
           )}
         </div>
       </div>
+
+      {note.available && confirming && (
+        <div
+          role="group"
+          aria-label={`Remove ${documentName(note.filename)}?`}
+          className="mx-5 mb-4 flex flex-col gap-3 rounded-xl border border-pen/40 bg-pen-soft p-4 sm:mx-7 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-[14px] leading-snug">
+            Remove this PDF? The pipeline stops using it. Its questions and reels are kept, and uploading it again
+            brings it back.
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              className="inline-flex h-11 items-center rounded-xl border border-rule bg-sheet px-4 font-display text-[16px] font-semibold transition hover:border-ink/40"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(note.id, { onSuccess: () => setConfirming(false) })}
+              className="inline-flex h-11 items-center rounded-xl bg-pen px-4 font-display text-[16px] font-semibold text-on-ink transition hover:brightness-110 disabled:opacity-50"
+            >
+              {remove.isPending ? 'Removing…' : 'Remove'}
+            </button>
+          </div>
+        </div>
+      )}
+      {remove.isError && (
+        <p className="px-5 pb-4 text-[14px] text-pen sm:px-7">Couldn't remove it. {remove.error.message}</p>
+      )}
 
       {active && (kinds.length > 0 || stuck > 0) && (
         <ul aria-live="polite" className="-mt-1 flex max-w-[34rem] flex-col gap-1.5 px-5 pb-4 pl-[3.75rem] text-[14px] sm:pr-7 sm:pl-[4.25rem]">

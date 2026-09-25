@@ -16,7 +16,6 @@ chunk lies inside the page range (content/notes.py).
 
 from dataclasses import dataclass
 from datetime import timedelta
-from pathlib import Path
 
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
@@ -84,8 +83,9 @@ def _in_range(scope: NoteScope, chunk: Chunk) -> bool:
 
 
 def eligible_documents(kind: str, document_id: int | None = None) -> list[tuple[Document, NoteScope]]:
-    """PDFs whose scope asks for this kind, in pipeline order: Manage notes from the bottom up."""
-    documents = Document.objects.select_related("scope")
+    """Stored PDFs whose scope asks for this kind, in pipeline order: Manage notes from the bottom
+    up. A removed PDF is skipped entirely, including tasks already queued for it."""
+    documents = Document.objects.filter(available=True).select_related("scope")
     if document_id is not None:
         documents = documents.filter(pk=document_id)
     pairs = [(d, scope_for(d)) for d in documents]
@@ -126,10 +126,8 @@ def next_plan(kind: str, document_id: int | None = None, *, lock: bool = False) 
         chunk = min(chunks, key=lambda c: (order[c.document_id], c.page_start))
         return Plan(chunk.document, chunk=chunk)
 
-    # 3. The next page window no chunk covers yet (only PDFs present on disk can be read).
+    # 3. The next page window no chunk covers yet.
     for document, scope in documents:
-        if not Path(document.path).exists():
-            continue
         windows = uncovered_windows(document.chunks.all(), scope.page_from, scope.last_page,
                                     settings.KL_CHUNK_PAGES)
         if windows:

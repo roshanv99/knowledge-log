@@ -25,7 +25,8 @@ server {
   # Re-resolve service names on each request (Docker assigns new IPs on container recreate).
   resolver 127.0.0.11 valid=10s ipv6=off;
 
-  # A reel MP4 upload from the Mac runner. Keep in sync with KL_MAX_MEDIA_BYTES (backend/config/settings.py).
+  # A reel MP4 upload from the Mac runner, or a note PDF from the app. Keep in sync with
+  # KL_MAX_MEDIA_BYTES and KL_MAX_NOTE_BYTES (backend/config/settings.py).
   client_max_body_size 210m;
 
   # Google OAuth callbacks (oauth2-proxy).
@@ -79,6 +80,10 @@ server {
   # Everything else under /api/ (quiz, content, Manage notes' pipeline status/requests/retry,
   # Django admin) — require the Google session via oauth2-proxy.
   location /api/ {
+    # A note PDF upload (up to 95 MB) is stored in R2 before the response comes back.
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+
     auth_request /oauth2/auth;
     error_page 401 = @oauth2_signin;
 

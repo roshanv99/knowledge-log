@@ -15,10 +15,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from config.storage import get_storage
+from content import uploads
 from content.models import Document, NoteScope, Question, Reel, ReelView
 from content.notes import Note, list_notes, progress, questions_in_scope, reels_in_scope, scope_for
 from quiz import activity
-from quiz.models import Settings
 from quiz.services import rebuild_todays_set
 
 QUIZ_FIELDS = {"selected", "page_from", "page_to", "include_quiz"}
@@ -82,10 +82,9 @@ def _notes_list(params: dict | None = None) -> dict:
         items = shown[(page - 1) * size:page * size]
     else:
         items = shown
-    # Where each PDF sits in the pipeline order (only PDFs on disk take part), for reordering.
+    # Where each PDF sits in the pipeline order (only stored PDFs take part), for reordering.
     position = {n.document.pk: i for i, n in enumerate(available)}
     return {
-        "notes_dir": Settings.load().notes_dir_reported or str(settings.KL_NOTES_DIR).replace(str(Path.home()), "~", 1),
         "notes": [{**_note_data(n), "position": position.get(n.document.pk)} for n in items],
         "total": len(shown),
         "page": page or 1,
@@ -141,14 +140,14 @@ class PositionInput(serializers.Serializer):
 
 @api_view(["PUT"])
 def move(request: Request, document_id: int) -> Response:
-    """Drag to reorder: put one PDF at a 0-based position in the pipeline order (PDFs on disk).
+    """Drag to reorder: put one PDF at a 0-based position in the pipeline order (stored PDFs).
     Every PDF's priority is rewritten to its new index, so the order stays dense."""
     payload = PositionInput(data=request.data)
     payload.is_valid(raise_exception=True)
     order = [n.document for n in list_notes() if n.available]
     document = next((d for d in order if d.pk == document_id), None)
     if document is None:
-        return Response({"detail": "Only PDFs in the notes folder can be reordered."},
+        return Response({"detail": "Only stored PDFs can be reordered."},
                         status=status.HTTP_404_NOT_FOUND)
     order.remove(document)
     position = min(payload.validated_data["position"], len(order))
@@ -160,6 +159,31 @@ def move(request: Request, document_id: int) -> Response:
                 scope.priority = priority
                 scope.save(update_fields=["priority", "updated_at"])
     return Response({"id": document.pk, "position": position})
+
+
+@api_view(["PUT"])
+def upload_note(request: Request) -> Response:
+    """Add a PDF: the raw file is the request body, `?filename=` and optional `?folder=` in the
+    query. Streamed from the request itself (request.body would buffer it all in memory)."""
+    try:
+        length = int(request.headers.get("Content-Length", ""))
+    except ValueError:
+        return Response({"detail": "Content-Length is required."}, status=status.HTTP_411_LENGTH_REQUIRED)
+    try:
+        document, outcome = uploads.upload(request._request, length, request.query_params.get("filename", ""),
+                                           request.query_params.get("folder", ""))
+    except uploads.UploadError as e:
+        return Response({"detail": str(e)}, status=e.status)
+    note = next(n for n in list_notes() if n.document.pk == document.pk)
+    return Response({"note": _note_data(note), "outcome": outcome},
+                    status=status.HTTP_201_CREATED if outcome == "added" else status.HTTP_200_OK)
+
+
+@api_view(["DELETE"])
+def remove_note_file(request: Request, document_id: int) -> Response:
+    """Delete an uploaded PDF. Its questions and reels stay; uploading it again brings it back."""
+    uploads.remove(get_object_or_404(Document, pk=document_id))
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @api_view(["GET"])

@@ -15,6 +15,7 @@ import type {
   ScopeUpdate,
   Settings,
   Today,
+  UploadResult,
 } from './types'
 
 export class ApiError extends Error {
@@ -45,6 +46,35 @@ export function createApi(baseUrl: string) {
     return body as T
   }
 
+  // XMLHttpRequest rather than fetch: fetch can't report upload progress.
+  function uploadNote(file: File, folder: string, onProgress?: (fraction: number) => void): Promise<UploadResult> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('PUT', `${baseUrl}/notes/upload?${new URLSearchParams({ filename: file.name, folder })}`)
+      xhr.setRequestHeader('Content-Type', 'application/pdf')
+      xhr.responseType = 'json'
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress?.(e.loaded / e.total)
+      }
+      xhr.onload = () => {
+        const body = xhr.response
+        if (xhr.status >= 200 && xhr.status < 300 && body) resolve(body as UploadResult)
+        else if (xhr.status === 413 && !(body && typeof body.detail === 'string'))
+          reject(new ApiError(413, 'This PDF is too large to upload.'))
+        else
+          reject(
+            new ApiError(
+              xhr.status,
+              body && typeof body.detail === 'string' ? body.detail : `Upload failed (${xhr.status}).`,
+            ),
+          )
+      }
+      xhr.onerror = () =>
+        reject(new ApiError(0, "The upload didn't reach the server. Check your connection and try again."))
+      xhr.send(file)
+    })
+  }
+
   return {
     today: () => request<Today>('/quiz/today'),
     practice: (exclude: number[]) =>
@@ -65,6 +95,8 @@ export function createApi(baseUrl: string) {
     updateScope: (noteId: number, patch: Partial<NoteScope>) =>
       request<ScopeUpdate>(`/notes/${noteId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     noteItems: (noteId: number) => request<NoteItems>(`/notes/${noteId}/items`),
+    uploadNote,
+    removeNoteFile: (noteId: number) => request<null>(`/notes/${noteId}/file`, { method: 'DELETE' }),
     moveNote: (noteId: number, position: number) =>
       request<{ id: number; position: number }>(`/notes/${noteId}/position`, {
         method: 'PUT',

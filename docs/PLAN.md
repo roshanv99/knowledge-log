@@ -183,7 +183,7 @@ SRG itself is not changed.
      - The design follows a bubble answer-sheet concept: pencil-filled bubbles, red-pen marks, and a hand-drawn score circle.
      - Screens: Today, one question per screen with instant feedback, a result screen with a review of the questions you missed, Settings (pass mark), and a Reels placeholder.
    - **Manage notes tab** ✅ Built on 2026-09-24:
-     - It lists every PDF in the notes folder, grouped by sub-folder, with a select checkbox, a from–to page slider (with page fields and a strip showing how far the pipeline has read), and Quiz and Reels checkboxes.
+     - It lists every uploaded PDF (Upload PDF, stored in R2), filterable by folder, with a select checkbox, a from–to page slider (with page fields and a strip showing how far the pipeline has read), and Quiz and Reels checkboxes.
      - A preview lists the questions and reels in the chosen pages, with their source pages, and follows the slider live.
      - API: `GET /api/notes`, `PATCH /api/notes/{id}`, and `GET /api/notes/{id}/items`.
    - **Daily sets are built on the day** from in-scope, unused questions, replacing pre-assembly.

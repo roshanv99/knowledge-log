@@ -6,9 +6,7 @@ behind the app login once hosted.
 """
 
 from functools import wraps
-from pathlib import Path
 
-from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
@@ -18,6 +16,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from config.storage import get_storage
 from content.models import Document, GenerationRun, GenerationTask, Reel
 from pipeline import serializers as s
 from pipeline import services
@@ -67,8 +66,8 @@ def task_payload(task: GenerationTask) -> dict:
         "lease_expires_at": task.lease_expires_at,
         "chunk": {"id": chunk.pk, "page_start": chunk.page_start, "page_end": chunk.page_end,
                   "status": chunk.status, "title": chunk.title, "notes": chunk.notes},
-        "document": {"id": document.pk, "filename": document.filename, "path": document.path,
-                     "folder": document.folder, "page_count": document.page_count},
+        "document": {"id": document.pk, "filename": document.filename, "folder": document.folder,
+                     "page_count": document.page_count},
     }
 
 
@@ -150,14 +149,18 @@ def fail(request: Request, task_id: int) -> Response:
 
 @runner_endpoint(["GET"])
 def document_pdf(request: Request, document_id: int):
-    """The PDF itself, for runners that don't have the notes folder (a cloud routine, or a Mac
-    that can't read the Drive folder). Only files inside KL_NOTES_DIR are served."""
+    """The uploaded PDF, streamed from storage through here rather than via a signed R2 link:
+    a cloud routine can only reach this domain, and the runner's token must not travel to R2."""
     document = get_object_or_404(Document, pk=document_id, available=True)
-    notes_dir = settings.KL_NOTES_DIR.resolve()
-    path = Path(document.path).resolve()
-    if not path.is_relative_to(notes_dir) or not path.is_file():
+    try:
+        body, size = get_storage().open(document.storage_key) if document.storage_key else (None, 0)
+    except FileNotFoundError:
+        body = None
+    if body is None:
         return Response({"detail": "PDF not on the server."}, status=status.HTTP_404_NOT_FOUND)
-    return FileResponse(path.open("rb"), content_type="application/pdf", filename=document.filename)
+    response = FileResponse(body, content_type="application/pdf", filename=document.filename)
+    response["Content-Length"] = str(size)
+    return response
 
 
 @runner_endpoint(["POST"])
@@ -197,7 +200,7 @@ def pipeline_status(request: Request) -> Response:
         "recent_runs": [_run_row(r) for r in GenerationRun.objects.filter(finished_at__isnull=False)
                         .order_by("-finished_at")[:10]],
         "failed_tasks": [_task_row(t) for t in tasks.filter(status=GenerationTask.Status.FAILED)
-                         .order_by("chunk__document__path", "chunk__page_start")],
+                         .order_by("chunk__document__filename", "chunk__page_start")],
         "open_requests": [{"id": r.pk, "kind": r.kind, "created_at": r.created_at}
                           for r in RunRequest.objects.filter(consumed_by_run__isnull=True, expires_at__gt=now)],
         "runners": [{"name": r.name, "kind": r.kind, "last_seen_at": r.last_seen_at}

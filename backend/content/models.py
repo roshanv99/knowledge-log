@@ -9,16 +9,16 @@ from django.utils import timezone
 
 
 class Document(models.Model):
-    file_hash = models.CharField(max_length=64, unique=True)
-    path = models.TextField()
+    file_hash = models.CharField(max_length=64, unique=True)  # sha256 of the PDF: its identity
+    # Where the uploaded PDF is kept (config/storage.py); "" once it has been removed.
+    storage_key = models.CharField(max_length=300, blank=True, default="")
     filename = models.CharField(max_length=512)
     page_count = models.IntegerField()
     # Highest page N such that every page 1..N is in a finished chunk.
     last_processed_page = models.IntegerField(default=0)
     created_at = models.DateTimeField(default=timezone.now)
-    # Set by the pipeline's notes-sync report (pipeline/services.py::sync_notes), not computed
-    # live here — the backend and the notes folder are on different machines once deployed.
-    # Defaults true so a document looks normal until the pipeline's first sync says otherwise.
+    # True while the PDF is stored (uploaded and not removed). Its questions and reels stay
+    # either way; only an available PDF is offered to the pipeline.
     available = models.BooleanField(default=True)
     folder = models.CharField(max_length=500, blank=True, default="")
 
@@ -170,8 +170,7 @@ class ReelView(models.Model):
 class NoteScope(models.Model):
     """What the learner studies from one PDF: whether it's on, which pages, and for what.
 
-    Kept apart from `documents` because the pipeline shares that table. Also caches the
-    file's size and mtime so the notes folder can be rescanned without rehashing every PDF.
+    Kept apart from `documents` because the pipeline shares that table.
     """
 
     document = models.OneToOneField(Document, on_delete=models.CASCADE, primary_key=True, related_name="scope")
@@ -184,8 +183,6 @@ class NoteScope(models.Model):
     # Position in Manage notes, top first (drag to reorder). New PDFs go on top; the pipeline
     # works from the bottom up (content/notes.py `list_order`).
     priority = models.IntegerField(default=0)
-    file_size = models.BigIntegerField(null=True, blank=True)
-    file_mtime = models.FloatField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

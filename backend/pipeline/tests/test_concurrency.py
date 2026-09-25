@@ -8,10 +8,9 @@ from pipeline import planner, services
 
 
 @pytest.mark.django_db(transaction=True)
-def test_parallel_claims_never_share_a_task(tmp_path):
+def test_parallel_claims_never_share_a_task():
     for name in ("A.pdf", "B.pdf"):
-        (tmp_path / name).write_bytes(b"%PDF")
-        document = Document.objects.create(file_hash=name, path=str(tmp_path / name), filename=name, page_count=16)
+        document = Document.objects.create(file_hash=name, filename=name, page_count=16)
         NoteScope.objects.create(document=document)
     run = services.start_run("quiz", "test", {})
 

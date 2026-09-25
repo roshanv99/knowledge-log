@@ -13,7 +13,7 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def quiz_set():
-    document = Document.objects.create(file_hash="d", path="/d.pdf", filename="d.pdf", page_count=10)
+    document = Document.objects.create(file_hash="d", filename="d.pdf", page_count=10)
     chunk = Chunk.objects.create(document=document, page_start=1, page_end=10, status="read")
     task = GenerationTask.objects.create(chunk=chunk, kind="quiz", status="done")
     quiz_set = QuizSet.objects.create(available_on=timezone.localdate())

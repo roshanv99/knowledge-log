@@ -83,6 +83,31 @@ export function useMoveNote() {
   })
 }
 
+/** Upload one PDF; `onProgress` gets the fraction sent so far. The list refetches afterwards. */
+export function useUploadNote() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ file, folder, onProgress }: { file: File; folder: string; onProgress?: (f: number) => void }) =>
+      api.uploadNote(file, folder, onProgress),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.notes })
+      client.invalidateQueries({ queryKey: keys.pipeline })
+    },
+  })
+}
+
+/** Delete a PDF's stored file; its questions and reels stay. */
+export function useRemoveNoteFile() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (noteId: number) => api.removeNoteFile(noteId),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.notes })
+      client.invalidateQueries({ queryKey: keys.pipeline })
+    },
+  })
+}
+
 export function useReels() {
   return useQuery({ queryKey: keys.reels, queryFn: api.reels })
 }

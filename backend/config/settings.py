@@ -92,18 +92,17 @@ STORAGES = {
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 
-# PDFs the learner studies from (the same folder the pipeline reads).
-KL_NOTES_DIR = Path(env("KL_NOTES_DIR", Path.home() / "Documents" / "Notes")).expanduser()
-
 # Pipeline planner (docs/PIPELINE_DB.md): chunk size in pages, and how long a claim lasts without a heartbeat.
 KL_CHUNK_PAGES = int(env("KL_CHUNK_PAGES", "4"))
 KL_LEASE_SECONDS = int(env("KL_LEASE_SECONDS", "600"))
 KL_MAX_TASK_ATTEMPTS = 3
 
-# Generated media (reel MP4s): local disk in dev, Cloudflare R2 in production
-# (config/storage.py, docs/PLAN.md).
+# Uploaded note PDFs and generated media (reel MP4s): local disk in dev, Cloudflare R2 in
+# production (config/storage.py, docs/PLAN.md).
 MEDIA_ROOT = Path(env("KL_MEDIA_ROOT", REPO_ROOT / "data" / "media")).expanduser()
 KL_MAX_MEDIA_BYTES = int(env("KL_MAX_MEDIA_BYTES", str(200 * 1024 * 1024)))
+# Uploads come through Cloudflare, which refuses request bodies over 100 MB on its free plan.
+KL_MAX_NOTE_BYTES = int(env("KL_MAX_NOTE_BYTES", str(95 * 1024 * 1024)))
 
 STORAGE_BACKEND = env("STORAGE_BACKEND", "local")  # "local" or "r2"
 R2_BUCKET = env("R2_BUCKET", "")

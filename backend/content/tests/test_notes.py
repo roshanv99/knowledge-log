@@ -1,35 +1,46 @@
-import hashlib
+from io import BytesIO
+from urllib.parse import urlencode
 
 import pytest
+from pypdf import PdfWriter
 from rest_framework.test import APIClient
 
 from content.models import Chunk, Document, GenerationTask, NoteScope, Question
-from pipeline import services
+from pipeline.tests.test_api import API, runner_client
 from quiz.models import QuizAttempt, QuizSet
 
 pytestmark = pytest.mark.django_db
 
 
-def entry(path: str, pages: int, folder: str = "") -> dict:
-    """A scan() entry without a real file: `path` only needs to be a stable, unique string, and
-    its hash is derived from it directly."""
-    return {"path": path, "filename": path.rsplit("/", 1)[-1],
-            "file_hash": hashlib.sha256(path.encode()).hexdigest(),
-            "size": pages * 137, "mtime": 1.0, "page_count": pages, "folder": folder}
+def pdf(pages: int, title: str, password: str | None = None) -> bytes:
+    """A real PDF; the title makes each one's content (so its identity) distinct."""
+    writer = PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=200, height=200)
+    writer.add_metadata({"/Title": title})
+    if password:
+        writer.encrypt(password)
+    out = BytesIO()
+    writer.write(out)
+    return out.getvalue()
 
 
-def sync(entries: list[dict]) -> dict:
-    """A full-state sync: every call lists every PDF there is; anything omitted is marked
-    unavailable."""
-    return services.sync_notes(entries, "/notes")
+def upload(filename: str, body: bytes, folder: str = ""):
+    query = urlencode({"filename": filename, "folder": folder})
+    return APIClient().generic("PUT", f"/api/notes/upload?{query}", body, content_type="application/pdf")
+
+
+def add(filename: str, pages: int, folder: str = "") -> dict:
+    response = upload(filename, pdf(pages, filename), folder)
+    assert response.status_code == 201, response.data
+    return response.data
 
 
 @pytest.fixture
-def notes_dir():
-    """Registers Redis.pdf and NGINX.pdf. NGINX is sent first so Redis — processed last, same
-    as the real pipeline's sorted-path walk where "Redis.pdf" sorts after "NGINX.pdf" — ends up
-    on top ("each new PDF goes on top" — content/notes.py::apply_sync_report)."""
-    sync([entry("/notes/Tech/NGINX.pdf", 5, "Tech"), entry("/notes/Tech/Redis.pdf", 12, "Tech")])
+def two_pdfs():
+    """NGINX.pdf, then Redis.pdf: each new PDF goes on top, so Redis ends up first."""
+    add("NGINX.pdf", 5, "Tech")
+    add("Redis.pdf", 12, "Tech")
 
 
 def add_questions(document: Document, pages: list[list[int]]) -> None:
@@ -40,36 +51,81 @@ def add_questions(document: Document, pages: list[list[int]]) -> None:
                                 explanation="e", source_pages=source, difficulty="easy")
 
 
-def test_lists_every_pdf_in_the_folder_with_defaults(notes_dir):
+def test_lists_every_uploaded_pdf_with_defaults(two_pdfs):
     data = APIClient().get("/api/notes").data["notes"]
     assert [(n["filename"], n["folder"], n["page_count"]) for n in data] == [("Redis.pdf", "Tech", 12),
                                                                               ("NGINX.pdf", "Tech", 5)]
     assert data[0]["scope"] == {"selected": True, "page_from": 1, "page_to": 12,
                                 "include_quiz": True, "include_reels": True, "priority": -1}
-    # Re-syncing the same report creates nothing new.
-    sync([entry("/notes/Tech/NGINX.pdf", 5, "Tech"), entry("/notes/Tech/Redis.pdf", 12, "Tech")])
+    # Uploading the same PDF again adds nothing.
+    again = upload("Redis copy.pdf", pdf(12, "Redis.pdf"))
+    assert again.status_code == 200 and again.data["outcome"] == "exists"
     assert Document.objects.count() == 2 and NoteScope.objects.count() == 2
 
 
-def test_missing_pdf_is_listed_as_unavailable(notes_dir):
-    sync([entry("/notes/Tech/Redis.pdf", 12, "Tech")])  # NGINX no longer reported
+def test_upload_is_stored_by_content(two_pdfs, settings):
+    redis = Document.objects.get(filename="Redis.pdf")
+    assert redis.storage_key == f"notes/default/{redis.file_hash}.pdf"
+    assert (settings.MEDIA_ROOT / redis.storage_key).read_bytes() == pdf(12, "Redis.pdf")
+
+
+@pytest.mark.parametrize("filename, body, message", [
+    ("notes.txt", b"%PDF-1.7 whatever", "Only PDF files can be uploaded."),
+    ("Fake.pdf", b"this is not a pdf at all", "That file isn't a PDF."),
+    ("Broken.pdf", b"%PDF-1.7 and then nothing useful", "This file couldn't be read as a PDF."),
+    ("Locked.pdf", pdf(2, "Locked", password="secret"), "This PDF is password-protected."),
+])
+def test_upload_rejects_what_isnt_a_usable_pdf(filename, body, message):
+    response = upload(filename, body)
+    assert response.status_code == 400 and response.data["detail"].startswith(message)
+    assert Document.objects.count() == 0
+
+
+def test_upload_size_limit(settings):
+    settings.KL_MAX_NOTE_BYTES = 100
+    response = upload("Big.pdf", pdf(3, "Big"))
+    assert response.status_code == 413 and "up to" in response.data["detail"]
+    assert Document.objects.count() == 0
+
+
+def test_removed_pdf_is_listed_as_unavailable_and_its_file_deleted(two_pdfs, settings,
+                                                                   django_capture_on_commit_callbacks):
+    nginx = Document.objects.get(filename="NGINX.pdf")
+    key = nginx.storage_key
+    with django_capture_on_commit_callbacks(execute=True):  # the file is deleted once the removal commits
+        assert APIClient().delete(f"/api/notes/{nginx.pk}/file").status_code == 204
     data = APIClient().get("/api/notes").data["notes"]
     assert [(n["filename"], n["available"]) for n in data] == [("Redis.pdf", True), ("NGINX.pdf", False)]
+    assert not (settings.MEDIA_ROOT / key).exists()
 
 
-def test_renamed_file_is_recognised_by_content_not_path(notes_dir):
-    """Same file_hash, different path/filename: the existing Document is updated in place,
-    not duplicated — a moved or renamed PDF stays the same document."""
+def test_uploading_a_removed_pdf_again_restores_it_with_its_progress(two_pdfs):
+    """Same content under a new name and folder: the same Document comes back, not a new one."""
     redis = Document.objects.get(filename="Redis.pdf")
-    moved = entry("/notes/Archive/Redis-2024.pdf", 12, "Archive")
-    moved["file_hash"] = redis.file_hash
-    sync([entry("/notes/Tech/NGINX.pdf", 5, "Tech"), moved])
+    add_questions(redis, [[1], [2]])
+    APIClient().delete(f"/api/notes/{redis.pk}/file")
+    response = upload("Redis-2024.pdf", pdf(12, "Redis.pdf"), "Archive")
+    assert response.status_code == 200 and response.data["outcome"] == "restored"
     redis.refresh_from_db()
-    assert redis.filename == "Redis-2024.pdf" and redis.folder == "Archive" and redis.available
-    assert Document.objects.count() == 2  # still just Redis + NGINX, nothing duplicated
+    assert (redis.filename, redis.folder, redis.available) == ("Redis-2024.pdf", "Archive", True)
+    assert response.data["note"]["questions"]["total"] == 2
+    assert Document.objects.count() == 2
 
 
-def test_scope_update_counts_items_in_range(notes_dir):
+def test_runner_downloads_the_uploaded_pdf(two_pdfs):
+    redis = Document.objects.get(filename="Redis.pdf")
+    url = f"{API}/documents/{redis.pk}/pdf"
+    assert APIClient().get(url).status_code in (401, 403)
+    runner = runner_client("kl@test")
+    response = runner.get(url)
+    assert response.status_code == 200 and response["Content-Type"] == "application/pdf"
+    assert b"".join(response.streaming_content) == pdf(12, "Redis.pdf")
+
+    APIClient().delete(f"/api/notes/{redis.pk}/file")
+    assert runner.get(url).status_code == 404
+
+
+def test_scope_update_counts_items_in_range(two_pdfs):
     client = APIClient()
     redis = Document.objects.get(filename="Redis.pdf")
     add_questions(redis, [[1], [2, 3], [8], [11, 12]])
@@ -85,21 +141,21 @@ def test_scope_update_counts_items_in_range(notes_dir):
     assert NoteScope.objects.get(document=redis).page_to is None  # stored as "to the end"
 
 
-def test_scope_rejects_bad_ranges(notes_dir):
+def test_scope_rejects_bad_ranges(two_pdfs):
     client = APIClient()
     redis = Document.objects.get(filename="Redis.pdf")
     assert client.patch(f"/api/notes/{redis.pk}", {"page_from": 9, "page_to": 3}, format="json").status_code == 400
     assert client.patch(f"/api/notes/{redis.pk}", {"page_to": 13}, format="json").status_code == 400
 
 
-def test_reels_toggle_leaves_todays_quiz_alone(notes_dir):
+def test_reels_toggle_leaves_todays_quiz_alone(two_pdfs):
     client = APIClient()
     redis = Document.objects.get(filename="Redis.pdf")
     response = client.patch(f"/api/notes/{redis.pk}", {"include_reels": False}, format="json")
     assert response.data["todays_quiz"] is None
 
 
-def test_started_quiz_is_not_rebuilt(notes_dir):
+def test_started_quiz_is_not_rebuilt(two_pdfs):
     client = APIClient()
     redis = Document.objects.get(filename="Redis.pdf")
     add_questions(redis, [[1], [2]])
@@ -110,7 +166,7 @@ def test_started_quiz_is_not_rebuilt(notes_dir):
     assert response.data["todays_quiz"] == "started"
 
 
-def test_items_report_their_pages(notes_dir):
+def test_items_report_their_pages(two_pdfs):
     client = APIClient()
     redis = Document.objects.get(filename="Redis.pdf")
     add_questions(redis, [[4, 5]])
@@ -119,7 +175,7 @@ def test_items_report_their_pages(notes_dir):
     assert items["reels"] == []
 
 
-def test_progress_per_kind_and_manage_notes_order(notes_dir):
+def test_progress_per_kind_and_manage_notes_order(two_pdfs):
     from datetime import timedelta
 
     from django.utils import timezone
@@ -159,12 +215,10 @@ def test_progress_per_kind_and_manage_notes_order(notes_dir):
 
 
 def test_paginated_filtered_list():
-    # In the pipeline's real sorted-path processing order — each new PDF goes on top, so the
-    # last one synced (Redis) ends up first.
-    entries = [entry("/notes/Maths/Algebra.pdf", 2, "Maths"), entry("/notes/Maths/Graphs.pdf", 3, "Maths"),
-               entry("/notes/Tech/Docker.pdf", 4, "Tech"), entry("/notes/Tech/Kafka.pdf", 5, "Tech"),
-               entry("/notes/Tech/NGINX.pdf", 6, "Tech"), entry("/notes/Tech/Redis.pdf", 7, "Tech")]
-    sync(entries)
+    # Each new PDF goes on top, so the last one uploaded (Redis) ends up first.
+    for name, pages, folder in [("Algebra.pdf", 2, "Maths"), ("Graphs.pdf", 3, "Maths"), ("Docker.pdf", 4, "Tech"),
+                                ("Kafka.pdf", 5, "Tech"), ("NGINX.pdf", 6, "Tech"), ("Redis.pdf", 7, "Tech")]:
+        add(name, pages, folder)
     app = APIClient()
     assert [n["filename"] for n in app.get("/api/notes").data["notes"]] == [
         "Redis.pdf", "NGINX.pdf", "Kafka.pdf", "Docker.pdf", "Graphs.pdf", "Algebra.pdf"]
@@ -190,5 +244,5 @@ def test_paginated_filtered_list():
     # A PDF added after reordering still goes on top.
     app.put(f"/api/notes/{Document.objects.get(filename='Algebra.pdf').pk}/position", {"position": 0},
              format="json")
-    sync(entries + [entry("/notes/Maths/Calculus.pdf", 8, "Maths")])
+    add("Calculus.pdf", 8, "Maths")
     assert names(page_size=100)[:2] == ["Calculus.pdf", "Algebra.pdf"]

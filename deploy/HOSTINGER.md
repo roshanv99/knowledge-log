@@ -165,39 +165,15 @@ Daily cron in the `deploy` user's own crontab (installed by every deploy, or man
 sudo) dumps Postgres at 18:30 UTC (midnight IST) and uploads to `gdrive:knowledge-log-backups/`.
 Logs: `~/logs/knowledge-log-backup.log`. Cron times are UTC: this box's cron ignores `CRON_TZ`.
 
-R2 media (reel MP4s/posters) is not separately backed up — R2 is itself durable, and the
-source notes live in Google Drive.
+R2 (note PDFs, reel MP4s/posters) is not separately backed up — R2 is itself durable. Keep
+your own copy of the note PDFs you upload.
 
-## Notes from Google Drive
+## Notes
 
-The PDFs live in Google Drive (`Project Data/Knowledge Log/Notes`). `deploy/notes-sync.sh`
-mirrors that folder into `/opt/knowledge-log/notes` (mounted read-only into the backend as
-`/notes`) and runs `manage.py sync_notes`, which marks each PDF available or not. It runs
-daily at 00:15 UTC (05:45 IST), before the 06:00 IST cloud routines, from the same crontab as
-the backup. Runners download the PDF for a task from `GET /api/pipeline/documents/<id>/pdf`.
-
-Drive access is a Google service account the Notes folder alone is shared with (Viewer), so
-it can't read anything else. One-time setup:
-
-1. Google Cloud Console: enable the Google Drive API, create a service account (no roles),
-   and add a JSON key.
-2. Drive: share the Notes folder with the service account's email as Viewer. Copy the
-   folder ID from its URL (after `/folders/`).
-3. On the server, as `deploy`:
-
-```bash
-mkdir -p ~/.config/rclone && chmod 700 ~/.config/rclone
-# copy the key to ~/.config/rclone/notes-sa.json, then:
-chmod 600 ~/.config/rclone/notes-sa.json
-rclone config create notes drive scope=drive.readonly \
-  service_account_file="$HOME/.config/rclone/notes-sa.json" root_folder_id=<FOLDER_ID> \
-  --config ~/.config/rclone/notes.conf
-chmod 600 ~/.config/rclone/notes.conf
-bash /opt/knowledge-log/deploy/notes-sync.sh   # first sync; logs go to ~/logs from cron
-```
-
-`notes.conf` is kept apart from `rclone.conf` because `backup.sh` rewrites `rclone.conf` from
-`RCLONE_CONFIG_B64` on every deploy.
+PDFs are uploaded in the app (Manage notes → Upload PDF, up to 95 MB: Cloudflare's free plan
+refuses larger request bodies) and stored in R2 under `notes/default/<sha256>.pdf`. Runners
+download the PDF for a task from `GET /api/pipeline/documents/<id>/pdf`, streamed from R2
+through the backend. Nothing on this box holds note files.
 
 ## 10. Disk space
 

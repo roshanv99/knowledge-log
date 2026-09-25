@@ -23,10 +23,8 @@ def runner_client(name: str) -> APIClient:
 
 
 @pytest.fixture
-def document(tmp_path):
-    path = tmp_path / "Docker.pdf"
-    path.write_bytes(b"%PDF")
-    doc = Document.objects.create(file_hash="d", path=str(path), filename="Docker.pdf", page_count=8)
+def document():
+    doc = Document.objects.create(file_hash="d", filename="Docker.pdf", page_count=8)
     NoteScope.objects.create(document=doc)
     return doc
 

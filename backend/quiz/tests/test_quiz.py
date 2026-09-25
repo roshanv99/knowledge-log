@@ -12,7 +12,7 @@ pytestmark = pytest.mark.django_db
 
 
 def make_questions(n: int, pages=lambda i: [i + 1], filename="Notes.pdf") -> list[Question]:
-    document = Document.objects.create(file_hash=filename, path=f"/{filename}", filename=filename, page_count=50)
+    document = Document.objects.create(file_hash=filename, filename=filename, page_count=50)
     chunk = Chunk.objects.create(document=document, page_start=1, page_end=50, status="read", title="Topic")
     task = GenerationTask.objects.create(chunk=chunk, kind="quiz", status="done")
     return [Question.objects.create(chunk=chunk, task=task, stem=f"Q{i}?", options=["a", "b", "c", "d"],

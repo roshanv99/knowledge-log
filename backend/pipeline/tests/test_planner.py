@@ -19,12 +19,10 @@ def runner(kind=Runner.RunnerKind.CLAUDE_SESSION) -> Runner:
 
 
 @pytest.fixture
-def make_doc(tmp_path):
-    def make(name: str, pages: int, *, on_disk: bool = True, **scope) -> Document:
-        path = tmp_path / name
-        if on_disk:
-            path.write_bytes(b"%PDF")
-        document = Document.objects.create(file_hash=name, path=str(path), filename=name, page_count=pages)
+def make_doc():
+    def make(name: str, pages: int, *, available: bool = True, **scope) -> Document:
+        document = Document.objects.create(file_hash=name, storage_key=f"notes/default/{name}", filename=name,
+                                           page_count=pages, available=available)
         NoteScope.objects.create(document=document, **scope)
         return document
     return make
@@ -137,12 +135,24 @@ def test_chunks_read_for_another_kind_get_a_task(make_doc):
     assert task.chunk == chunk and task.kind == "quiz"
 
 
-def test_unreadable_chunks_and_missing_files_are_skipped(make_doc):
+def test_unreadable_chunks_and_removed_pdfs_are_skipped(make_doc):
     document = make_doc("A.pdf", 8)
     Chunk.objects.create(document=document, page_start=1, page_end=4, status=Chunk.Status.UNREADABLE)
-    make_doc("Gone.pdf", 8, on_disk=False, priority=-1)
+    make_doc("Gone.pdf", 8, available=False, priority=-1)
     task = services.claim(new_run())
     assert task.chunk.document == document and claimed_pages(task) == (5, 8)
+
+
+def test_queued_work_for_a_removed_pdf_is_not_offered(make_doc):
+    """A task already queued for a PDF that is removed afterwards stays queued, but isn't
+    handed out: the runner couldn't download the file."""
+    gone = make_doc("Gone.pdf", 8, priority=5)
+    kept = make_doc("Kept.pdf", 8)
+    chunk = Chunk.objects.create(document=gone, page_start=1, page_end=4)
+    GenerationTask.objects.create(chunk=chunk, kind="quiz")
+    Document.objects.filter(pk=gone.pk).update(available=False)
+    task = services.claim(new_run())
+    assert task.chunk.document == kept
 
 
 def test_document_filter(make_doc):

@@ -54,8 +54,7 @@ class FakeApi:
             "id": self.next_id, "kind": "quiz", "attempt": 1, "lease_expires_at": None,
             "chunk": {"id": self.next_id, "page_start": start, "page_end": end,
                       "status": "read" if notes else "unread", "title": notes and notes["title"], "notes": notes},
-            "document": {"id": 1, "filename": self.pdf.name, "path": f"/notes/{self.pdf.name}",
-                         "folder": "", "page_count": 12}}, "reason": None}
+            "document": {"id": 1, "filename": self.pdf.name, "folder": "", "page_count": 12}}, "reason": None}
 
     def download_pdf(self, document_id, dest):
         self.calls.append(("download_pdf", document_id))

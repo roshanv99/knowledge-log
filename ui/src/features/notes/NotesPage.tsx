@@ -9,6 +9,7 @@ import { ErrorState } from '../../components/ErrorState'
 import { documentName } from '../quiz/format'
 import { NoteCard } from './NoteCard'
 import { PipelinePanel } from './PipelinePanel'
+import { UploadPanel } from './UploadPanel'
 
 const SEARCH_DEBOUNCE_MS = 250
 
@@ -69,15 +70,20 @@ export function NotesPage() {
           <ErrorState error={notes.error} onRetry={() => notes.refetch()} />
         </div>
       ) : notes.data.summary.documents === 0 ? (
-        <section className="mt-8 max-w-[56ch]">
-          <h2 className="font-display text-[22px] font-semibold">Your notes folder is empty</h2>
-          <p className="mt-2 leading-relaxed text-muted">
-            Add PDFs to <code className="font-code text-[0.9em]">{notes.data.notes_dir}</code> and they'll show up
-            here.
-          </p>
-        </section>
+        <>
+          <UploadPanel folders={[]} />
+          <section className="mt-8 max-w-[56ch]">
+            <h2 className="font-display text-[22px] font-semibold">No notes yet</h2>
+            <p className="mt-2 leading-relaxed text-muted">
+              Upload a PDF to get started. Quiz questions and reels are made from the PDFs you add here.
+            </p>
+          </section>
+        </>
       ) : (
-        <NoteList list={notes.data} query={query} setQuery={setQuery} stale={notes.isPlaceholderData} />
+        <>
+          <UploadPanel folders={notes.data.folders} />
+          <NoteList list={notes.data} query={query} setQuery={setQuery} stale={notes.isPlaceholderData} />
+        </>
       )}
     </div>
   )
@@ -103,13 +109,13 @@ function NoteList({
   const top = useRef<HTMLDivElement>(null)
 
   const filtered = !!(query.q || query.folder || query.selected !== 'all')
-  const onDisk = list.notes.filter((n) => n.available && n.position !== null)
+  const stored = list.notes.filter((n) => n.available && n.position !== null)
   const missing = list.notes.filter((n) => !n.available)
-  const byId = new Map(onDisk.map((n) => [n.id, n]))
-  const shown = dragOrder ? dragOrder.map((id) => byId.get(id)).filter((n): n is Note => !!n) : onDisk
+  const byId = new Map(stored.map((n) => [n.id, n]))
+  const shown = dragOrder ? dragOrder.map((id) => byId.get(id)).filter((n): n is Note => !!n) : stored
   // Reordering needs the whole list in view: a position inside a filtered list is ambiguous.
-  const reorderable = !filtered && onDisk.length > 0
-  const firstPosition = onDisk[0]?.position ?? 0
+  const reorderable = !filtered && stored.length > 0
+  const firstPosition = stored[0]?.position ?? 0
   const pages = Math.max(1, Math.ceil(list.total / list.page_size))
   const from = list.total === 0 ? 0 : (list.page - 1) * list.page_size + 1
   const to = Math.min(list.page * list.page_size, list.total)
@@ -160,9 +166,6 @@ function NoteList({
         <span className="font-display text-[17px] font-semibold">{list.summary.questions_ready}</span> questions ready for
         quizzes.
       </p>
-      <p className="mt-1 text-[13px] text-muted">
-        Reading from <code className="font-code">{list.notes_dir}</code>
-      </p>
 
       <div ref={top} className="scroll-mt-4">
         <Toolbar list={list} query={query} setQuery={setQuery} />
@@ -187,7 +190,7 @@ function NoteList({
           </section>
         ) : (
           <>
-            {filtered && onDisk.length > 1 && (
+            {filtered && stored.length > 1 && (
               <p className="mb-3 text-[13px] text-muted">Clear the search and filters to reorder.</p>
             )}
             {reorderable ? (
@@ -219,7 +222,7 @@ function NoteList({
               </Reorder.Group>
             ) : (
               <ul className="flex flex-col gap-3">
-                {onDisk.map((note) => (
+                {stored.map((note) => (
                   <li key={note.id}>
                     <NoteCard note={note} expanded={expanded.has(note.id)} onToggle={() => toggle(note.id)} />
                   </li>
@@ -227,8 +230,8 @@ function NoteList({
               </ul>
             )}
             {missing.length > 0 && (
-              <section aria-label="No longer in the notes folder" className="mt-6">
-                <h2 className="font-display text-[17px] font-semibold text-muted">No longer in the notes folder</h2>
+              <section aria-label="Removed PDFs" className="mt-6">
+                <h2 className="font-display text-[17px] font-semibold text-muted">Removed PDFs</h2>
                 <ul className="mt-3 flex flex-col gap-3">
                   {missing.map((note) => (
                     <li key={note.id}>

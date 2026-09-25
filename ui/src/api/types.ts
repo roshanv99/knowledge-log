@@ -96,15 +96,15 @@ export interface KindProgress {
 export interface Note {
   id: number
   filename: string
-  /** Sub-folder inside the notes folder ('' for the top level or a missing file). */
+  /** The folder it was uploaded into ('' for none). */
   folder: string
-  /** False when the PDF is no longer in the notes folder. */
+  /** False once the PDF has been removed; its questions and reels stay. */
   available: boolean
   page_count: number
   /** Every page up to here has been read by the generation pipeline. */
   processed_to: number
   scope: NoteScope
-  /** 0-based place in the pipeline order among PDFs on disk; null for a missing PDF. */
+  /** 0-based place in the pipeline order among stored PDFs; null for a removed one. */
   position: number | null
   progress: Record<ContentKind, KindProgress>
   questions: { total: number; in_scope: number }
@@ -112,14 +112,13 @@ export interface Note {
 }
 
 export interface NotesList {
-  notes_dir: string
   /** One page of PDFs, in pipeline order, after filtering. */
   notes: Note[]
   /** How many PDFs match the filters (across all pages). */
   total: number
   page: number
   page_size: number
-  /** Sub-folders that hold PDFs, for the folder filter. */
+  /** Folders that hold PDFs, for the folder filter. */
   folders: string[]
   /** Across every PDF, ignoring filters. */
   summary: { documents: number; selected: number; questions_ready: number }
@@ -239,4 +238,12 @@ export interface ActivitySummary {
   streaks: { questions: number; reels: number }
   /** Only days with activity; others are empty. */
   days: ActivityDay[]
+}
+
+/** added: a new PDF. restored: a removed PDF is back, with its progress. exists: already there. */
+export type UploadOutcome = 'added' | 'restored' | 'exists'
+
+export interface UploadResult {
+  note: Note
+  outcome: UploadOutcome
 }

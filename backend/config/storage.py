@@ -1,5 +1,6 @@
-"""Storage for generated media (reel MP4s and poster PNGs), keyed as `reels/task-<id>.mp4`
-etc. (see `pipeline.services.media_key`).
+"""Storage for uploaded note PDFs (`notes/<owner>/<sha256>.pdf`, content/uploads.py) and
+generated media (reel MP4s and poster PNGs, `reels/task-<id>.mp4` etc., see
+`pipeline.services.media_key`).
 
 Two backends behind one interface, chosen by `STORAGE_BACKEND`:
   - LocalDiskStorage: writes under MEDIA_ROOT, served by content.views.media. The default,
@@ -13,7 +14,7 @@ repo's key layout and to taking bytes directly rather than a local path (the pip
 streams an HTTP upload straight through, see pipeline.services.save_media).
 """
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 from django.conf import settings
 
@@ -29,6 +30,14 @@ class Storage(Protocol):
         ...
 
     def exists(self, key: str) -> bool: ...
+
+    def open(self, key: str) -> tuple[BinaryIO, int]:
+        """The object as a readable stream, and its size in bytes. FileNotFoundError if absent."""
+        ...
+
+    def delete(self, key: str) -> None:
+        """Remove the object; a missing one is not an error."""
+        ...
 
 
 class LocalDiskStorage:
@@ -55,6 +64,13 @@ class LocalDiskStorage:
 
     def exists(self, key: str) -> bool:
         return self._path(key).exists()
+
+    def open(self, key: str) -> tuple[BinaryIO, int]:
+        path = self._path(key)
+        return path.open("rb"), path.stat().st_size
+
+    def delete(self, key: str) -> None:
+        self._path(key).unlink(missing_ok=True)
 
 
 class R2Storage:
@@ -105,7 +121,7 @@ class R2Storage:
             region_name="auto",
         )
 
-    _CONTENT_TYPES = {".mp4": "video/mp4", ".png": "image/png"}
+    _CONTENT_TYPES = {".mp4": "video/mp4", ".png": "image/png", ".pdf": "application/pdf"}
 
     def _content_type(self, key: str) -> str:
         return self._CONTENT_TYPES.get(Path(key).suffix.lower(), "application/octet-stream")
@@ -139,6 +155,20 @@ class R2Storage:
             return True
         except ClientError:
             return False
+
+    def open(self, key: str) -> tuple[BinaryIO, int]:
+        from botocore.exceptions import ClientError
+
+        try:
+            obj = self.client.get_object(Bucket=self.bucket, Key=key)
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                raise FileNotFoundError(key) from None
+            raise
+        return obj["Body"], obj["ContentLength"]
+
+    def delete(self, key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=key)
 
 
 def get_storage() -> Storage:
