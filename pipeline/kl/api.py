@@ -43,7 +43,9 @@ class HttpApi:
 
     def _call(self, method: str, path: str, body: dict | None = None, *, runner: bool = True,
               raw: bytes | None = None, content_type: str | None = None, timeout: float | None = None):
-        headers = {"Accept": "application/json"}
+        # Cloudflare (in front of the deployed API) blocks the default "Python-urllib/x.y"
+        # User-Agent outright — a known bot signature, nothing to do with this being a runner.
+        headers = {"Accept": "application/json", "User-Agent": "knowledge-log-runner/1.0"}
         data = None
         if body is not None:
             data = json.dumps(body).encode()
