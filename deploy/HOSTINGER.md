@@ -160,9 +160,10 @@ refreshes `api-gateway-2` in the same session.
 
 ## 9. Backups
 
-Daily cron (installed by every deploy, or manually via
-`sudo bash deploy/install-backup-cron.sh /opt/knowledge-log`) dumps Postgres and uploads to
-`gdrive:knowledge-log-backups/`. Logs: `/var/log/knowledge-log-backup.log`.
+Daily cron in the `deploy` user's own crontab (installed by every deploy, or manually via
+`bash deploy/install-backup-cron.sh /opt/knowledge-log` — no root needed, `deploy` has no
+sudo) dumps Postgres and uploads to `gdrive:knowledge-log-backups/`. Logs:
+`~/logs/knowledge-log-backup.log`.
 
 R2 media (reel MP4s/posters) is not separately backed up — R2 is itself durable, and source
 notes/scripts live on the Mac.

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Install /etc/cron.d/knowledge-log-backup — daily midnight backup to Google Drive.
-# Run on the Hostinger host as root (once, or automatically after each deploy).
+# Install a daily midnight backup to Google Drive in the current user's own crontab.
+# Run on the Hostinger host (once, or automatically after each deploy) — no root needed. The
+# `deploy` user this runs as in CI has no sudo (by design, see api-gateway-2/CLAUDE.md), so
+# this uses `crontab`, not /etc/cron.d (which only root can write).
 
 set -euo pipefail
 
@@ -10,11 +12,6 @@ if [[ -z "$DEPLOY_PATH" ]]; then
 fi
 DEPLOY_PATH="$(cd "$DEPLOY_PATH" && pwd)"
 
-if [[ "$(id -u)" -ne 0 ]]; then
-  echo "install-backup-cron.sh: run as root (sudo)" >&2
-  exit 1
-fi
-
 if [[ ! -f "${DEPLOY_PATH}/deploy/backup.sh" ]]; then
   echo "install-backup-cron.sh: missing ${DEPLOY_PATH}/deploy/backup.sh" >&2
   exit 1
@@ -22,25 +19,20 @@ fi
 
 # Midnight in this timezone (default: India). Override: BACKUP_CRON_TZ=UTC
 CRON_TZ="${BACKUP_CRON_TZ:-Asia/Kolkata}"
-CRON_USER="${BACKUP_CRON_USER:-root}"
-LOG_FILE="/var/log/knowledge-log-backup.log"
+LOG_DIR="${HOME}/logs"
+LOG_FILE="${LOG_DIR}/knowledge-log-backup.log"
+MARKER="# knowledge-log-backup (managed by deploy/install-backup-cron.sh — do not edit by hand)"
 
-touch "$LOG_FILE"
-chmod 644 "$LOG_FILE"
+mkdir -p "$LOG_DIR"
 
-cat > /etc/cron.d/knowledge-log-backup <<EOF
-# knowledge-log: daily Postgres dump → Google Drive (gdrive:knowledge-log-backups/)
-# Re-run: sudo bash deploy/install-backup-cron.sh ${DEPLOY_PATH}
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-CRON_TZ=${CRON_TZ}
+NEW_LINE="0 0 * * * cd ${DEPLOY_PATH} && bash deploy/backup.sh >> ${LOG_FILE} 2>&1 ${MARKER}"
+{
+  echo "CRON_TZ=${CRON_TZ}"
+  (crontab -l 2>/dev/null || true) | grep -vF "$MARKER" | grep -v '^CRON_TZ='
+  echo "$NEW_LINE"
+} | crontab -
 
-0 0 * * * ${CRON_USER} cd ${DEPLOY_PATH} && bash deploy/backup.sh >> ${LOG_FILE} 2>&1
-EOF
-
-chmod 644 /etc/cron.d/knowledge-log-backup
-
-echo "install-backup-cron.sh: installed /etc/cron.d/knowledge-log-backup"
+echo "install-backup-cron.sh: installed in ${USER}'s crontab"
 echo "  schedule: 00:00 daily (${CRON_TZ})"
 echo "  log:      ${LOG_FILE}"
 echo "  test now: cd ${DEPLOY_PATH} && bash deploy/backup.sh"
