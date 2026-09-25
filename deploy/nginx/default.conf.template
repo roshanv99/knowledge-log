@@ -1,0 +1,127 @@
+# Processed by the official nginx image: envsubst replaces ${DOMAIN}.
+# Render target: /etc/nginx/conf.d/default.conf (replaces the nginx welcome site).
+#
+# SSO is handled by oauth2-proxy; nginx enforces it via auth_request. This container is the
+# ui image (see ui/Dockerfile) — the SPA build is baked in at /usr/share/nginx/html, so
+# static assets are served from disk here rather than proxied to a separate web container.
+#
+# This server does not face the internet directly: the shared "hostinger-api-gateway" repo
+# terminates TLS and proxies here in plain HTTP over the external `gateway` docker network
+# (see docker-compose.gateway.yml). Hence "listen 80" with no redirect/cert of its own.
+
+map $http_x_forwarded_proto $external_proto {
+  default $http_x_forwarded_proto;
+  ""      $scheme;
+}
+
+server {
+  listen 80;
+  server_name ${DOMAIN};
+
+  # Emit relative Location headers so oauth2-proxy's redirects resolve against the https
+  # origin the browser is already on, not an absolute http:// URL (this server's own $scheme).
+  absolute_redirect off;
+
+  # Re-resolve service names on each request (Docker assigns new IPs on container recreate).
+  resolver 127.0.0.11 valid=10s ipv6=off;
+
+  # A reel MP4 upload from the Mac runner. Keep in sync with KL_MAX_MEDIA_BYTES (backend/config/settings.py).
+  client_max_body_size 210m;
+
+  # Google OAuth callbacks (oauth2-proxy).
+  location /oauth2/ {
+    set $upstream_oauth2 oauth2-proxy:4180;
+    proxy_pass http://$upstream_oauth2;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $external_proto;
+  }
+
+  # Internal auth check (oauth2-proxy).
+  location = /oauth2/auth {
+    internal;
+    set $upstream_oauth2 oauth2-proxy:4180;
+    proxy_pass http://$upstream_oauth2;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Uri $request_uri;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $external_proto;
+  }
+
+  # Public health (no SSO) — for the gateway's/compose's own probes.
+  location = /api/health {
+    set $upstream_api knowledge-log-backend:8000;
+    proxy_pass http://$upstream_api/api/health;
+    proxy_set_header Host $host;
+  }
+
+  # Runner surface (Authorization: Bearer klr_… — pipeline/auth.py). No SSO: the Mac runner
+  # has no Google session, it authenticates with its own token. Matches every path the
+  # runner calls (backend/pipeline/urls.py) and nothing the web app calls under its own
+  # login (status/requests/retry stay behind SSO via the generic /api/ location below).
+  location ~ ^/api/pipeline/(wanted|runs(/\d+/(claim|finish))?|tasks/\d+/(heartbeat|notes|complete|fail|media))$ {
+    # A reel upload can take a while over a home connection.
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+
+    set $upstream_api knowledge-log-backend:8000;
+    proxy_pass http://$upstream_api;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $external_proto;
+  }
+
+  # Everything else under /api/ (quiz, content, Manage notes' pipeline status/requests/retry,
+  # Django admin) — require the Google session via oauth2-proxy.
+  location /api/ {
+    auth_request /oauth2/auth;
+    error_page 401 = @oauth2_signin;
+
+    auth_request_set $auth_email $upstream_http_x_auth_request_email;
+    auth_request_set $auth_user $upstream_http_x_auth_request_user;
+
+    proxy_set_header X-Auth-Request-Email $auth_email;
+    proxy_set_header X-Auth-Request-User $auth_user;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $external_proto;
+
+    set $upstream_api knowledge-log-backend:8000;
+    proxy_pass http://$upstream_api;
+  }
+
+  location /admin/ {
+    auth_request /oauth2/auth;
+    error_page 401 = @oauth2_signin;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $external_proto;
+
+    set $upstream_api knowledge-log-backend:8000;
+    proxy_pass http://$upstream_api;
+  }
+
+  # The SPA. Static assets and the index.html fallback both require the Google session —
+  # unlike log-book, this app has no themed in-app /login page (oauth2-proxy sends
+  # unauthenticated visitors straight to Google), so nothing here needs to be public.
+  location / {
+    auth_request /oauth2/auth;
+    error_page 401 = @oauth2_signin;
+
+    root /usr/share/nginx/html;
+    try_files $uri /index.html;
+  }
+
+  # Redirect unauthenticated users to Google sign-in.
+  location @oauth2_signin {
+    return 302 /oauth2/start?rd=$external_proto://$host$request_uri;
+  }
+}

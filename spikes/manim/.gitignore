@@ -1,0 +1,6 @@
+out/
+scratch/
+.venv/
+__pycache__/
+# manim's own render cache (Tex/svg intermediates) — regenerated on every render.
+media/

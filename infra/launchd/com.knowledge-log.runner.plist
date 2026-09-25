@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  knowledge-log runner: every 5 minutes, ask the pipeline API whether a run is wanted.
+  The poll is plain Python and costs no Claude usage; it starts `claude -p "/mcq-generation"`
+  only when "Run now" was pressed (or auto-run is on in Settings). Install with
+  infra/launchd/install.sh; @REPO@ and @PATH@ are filled in there.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.knowledge-log.runner</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@UV@</string>
+    <string>run</string>
+    <string>--quiet</string>
+    <string>--project</string>
+    <string>pipeline</string>
+    <string>kl</string>
+    <string>runner</string>
+    <string>poll</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>@REPO@/logs/runner-poll.log</string>
+  <key>StandardErrorPath</key>
+  <string>@REPO@/logs/runner-poll.log</string>
+</dict>
+</plist>

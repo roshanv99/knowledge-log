@@ -1,0 +1,50 @@
+# Docker + Google SSO, fronted by the shared edge gateway (hostinger-api-gateway) or, for
+# local testing, run directly. See deploy/HOSTINGER.md.
+#
+#   cp deploy/env.example .env
+#   cp deploy/oauth2-proxy.env.example deploy/oauth2-proxy.env
+#   # fill in .env and deploy/oauth2-proxy.env
+#   docker network create gateway   # once, if not already created by the gateway repo
+#   docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d --build
+
+services:
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1
+    networks: [edge, internal]
+    env_file:
+      - ./deploy/oauth2-proxy.env
+    volumes:
+      - ./deploy/oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg:ro
+    command: --config=/etc/oauth2-proxy/oauth2-proxy.cfg
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./ui
+    networks:
+      edge:
+      internal:
+      # Shared with the hostinger-api-gateway project, which owns :80/:443 on this host.
+      # The alias is the name its nginx proxy_passes to, so it stays stable no matter what
+      # compose names this container.
+      gateway:
+        aliases:
+          - knowledgelog
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./deploy/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      oauth2-proxy:
+        condition: service_started
+      knowledge-log-backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  # Created once on the host with `docker network create gateway`, shared by every app
+  # behind the edge proxy. Declared external so neither this project nor the gateway owns
+  # its lifecycle.
+  gateway:
+    external: true
+    name: gateway

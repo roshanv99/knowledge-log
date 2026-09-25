@@ -1,0 +1,133 @@
+@import 'tailwindcss';
+
+/*
+  Design language: the bubble answer sheet.
+  Paper and green form ink carry the structure; graphite is the pencil; red pen marks mistakes.
+  Shape rule: bubbles are circles, controls (buttons, answer rows) are 12px, panels are 20px.
+*/
+
+:root {
+  --paper: #f3f7f2;
+  --sheet: #fbfdfb;
+  --ink: #1e6b4f;
+  --ink-soft: #dcebe1;
+  --graphite: #2b2f33;
+  --muted: #5b6b62;
+  --rule: #c9dccf;
+  --pen: #d2352b;
+  --pen-soft: #f8e3e0;
+  --on-ink: #fbfdfb;
+  /* Overlays on video are always on a dark picture, so they use the dark-theme ink in both themes. */
+  --on-video-ink: #6fcf9f;
+  /* Reels, next to questions' ink: progress bars and coverage strips. */
+  --reel: #5b5bd6;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #0e1a15;
+    --sheet: #13231c;
+    --ink: #6fcf9f;
+    --ink-soft: #1c3a2c;
+    --graphite: #e6eee9;
+    --muted: #93a79b;
+    --rule: #283d32;
+    --pen: #ff6b5e;
+    --pen-soft: #3b201d;
+    --on-ink: #0e1a15;
+    --reel: #a5a8ff;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --font-display: 'Barlow Semi Condensed', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Atkinson Hyperlegible Next', ui-sans-serif, system-ui, sans-serif;
+  --font-code: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-graphite: var(--graphite);
+  --color-muted: var(--muted);
+  --color-rule: var(--rule);
+  --color-pen: var(--pen);
+  --color-pen-soft: var(--pen-soft);
+  --color-on-ink: var(--on-ink);
+  --color-on-video-ink: var(--on-video-ink);
+  --color-reel: var(--reel);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply bg-paper font-body text-graphite antialiased;
+    min-height: 100dvh;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+}
+
+/* Dual page-range slider: two stacked native inputs; only their thumbs take pointer input.
+   Thumbs are answer-sheet bubbles. */
+@layer components {
+  .page-range-thumb {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    appearance: none;
+    background: transparent;
+    pointer-events: none;
+  }
+  .page-range-thumb::-webkit-slider-runnable-track {
+    background: transparent;
+  }
+  .page-range-thumb::-moz-range-track {
+    background: transparent;
+  }
+  .page-range-thumb::-webkit-slider-thumb {
+    appearance: none;
+    pointer-events: auto;
+    width: 28px;
+    height: 28px;
+    border-radius: 9999px;
+    background: var(--sheet);
+    border: 2.5px solid var(--ink);
+    cursor: grab;
+  }
+  .page-range-thumb::-moz-range-thumb {
+    pointer-events: auto;
+    width: 23px;
+    height: 23px;
+    border-radius: 9999px;
+    background: var(--sheet);
+    border: 2.5px solid var(--ink);
+    cursor: grab;
+  }
+  .page-range-thumb:active::-webkit-slider-thumb {
+    cursor: grabbing;
+    background: var(--ink-soft);
+  }
+  .page-range-thumb:focus-visible {
+    outline: none;
+  }
+  .page-range-thumb:focus-visible::-webkit-slider-thumb {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+  }
+  .page-range-thumb:focus-visible::-moz-range-thumb {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+  }
+}

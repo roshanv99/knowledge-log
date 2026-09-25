@@ -1,0 +1,10 @@
+{
+  "name": "Knowledge Log",
+  "short_name": "Knowledge Log",
+  "description": "Daily quizzes and reels from your own study notes.",
+  "start_url": "/quiz",
+  "display": "standalone",
+  "background_color": "#F3F7F2",
+  "theme_color": "#1E6B4F",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

@@ -1,0 +1,320 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "knowledge-log pipeline runners",
+    "output": "pipeline-runners.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1060,
+      620
+    ],
+    "views": [
+      {
+        "id": "driver-a",
+        "label": "A · own Claude Code",
+        "focus": [
+          "poller",
+          "session",
+          "engine",
+          "api",
+          "anthropic"
+        ],
+        "note": "The poller starts claude -p; the session writes, subagents critique, the engine owns state."
+      },
+      {
+        "id": "driver-b",
+        "label": "B · API key",
+        "focus": [
+          "worker",
+          "engine",
+          "api",
+          "anthropic"
+        ],
+        "note": "Long-running workers claim through the same engine and call the Messages API."
+      },
+      {
+        "id": "planner",
+        "label": "Planner and leases",
+        "focus": [
+          "ui",
+          "api",
+          "planner",
+          "pg"
+        ],
+        "note": "Manage notes scope and priority decide what gets claimed."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Manage notes UI",
+      "sublabel": "Run now · progress",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Pipeline API",
+      "sublabel": "/api/pipeline/*",
+      "pos": [
+        300,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "DRF"
+    },
+    {
+      "id": "planner",
+      "type": "backend",
+      "label": "Planner",
+      "sublabel": "scope · priority · leases",
+      "pos": [
+        560,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "pg",
+      "type": "database",
+      "label": "Postgres",
+      "sublabel": "tasks · chunks · runs",
+      "pos": [
+        820,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "poller",
+      "type": "backend",
+      "label": "kl runner poll",
+      "sublabel": "launchd · no LLM",
+      "pos": [
+        40,
+        290
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "session",
+      "type": "external",
+      "label": "A · Claude Code",
+      "sublabel": "claude -p per kind",
+      "pos": [
+        300,
+        290
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "own login · quiz ∥ reel"
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "B · API worker",
+      "sublabel": "kl mcq drive --api ×N",
+      "pos": [
+        580,
+        450
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "API key · quiz · untested"
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Step engine",
+      "sublabel": "kl mcq · kl reel",
+      "pos": [
+        580,
+        290
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "no LLM"
+    },
+    {
+      "id": "anthropic",
+      "type": "external",
+      "label": "Claude",
+      "sublabel": "Anthropic",
+      "pos": [
+        860,
+        450
+      ],
+      "size": [
+        130,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Cloud · Django + Postgres",
+      "wraps": [
+        "ui",
+        "api",
+        "planner",
+        "pg"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "runner token · HTTPS",
+      "wraps": [
+        "api"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Runner host · Mac for A; Mac or cloud for B",
+      "wraps": [
+        "poller",
+        "session",
+        "worker",
+        "engine"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "run-now",
+      "from": "ui",
+      "to": "api",
+      "label": "run request"
+    },
+    {
+      "id": "claim",
+      "from": "api",
+      "to": "planner",
+      "label": "claim"
+    },
+    {
+      "id": "skip-locked",
+      "from": "planner",
+      "to": "pg",
+      "label": "SKIP LOCKED"
+    },
+    {
+      "id": "poll",
+      "from": "poller",
+      "to": "api",
+      "label": "work waiting?",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "spawn-a",
+      "from": "poller",
+      "to": "session",
+      "label": "spawn",
+      "variant": "emphasis"
+    },
+    {
+      "id": "a-steps",
+      "from": "session",
+      "to": "engine",
+      "label": "submit",
+      "variant": "emphasis"
+    },
+    {
+      "id": "b-steps",
+      "from": "worker",
+      "to": "engine",
+      "label": "submit",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "engine-api",
+      "from": "engine",
+      "to": "api",
+      "label": "claim · heartbeat · complete",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "a-llm",
+      "from": "session",
+      "to": "anthropic",
+      "label": "session + subagents",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          385,
+          555
+        ],
+        [
+          925,
+          555
+        ]
+      ]
+    },
+    {
+      "id": "b-llm",
+      "from": "worker",
+      "to": "anthropic",
+      "label": "Messages API"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Step engines",
+      "items": [
+        "quiz: read → write → critique ≤3 → complete",
+        "reel: script → review → narrate → scene → render → visual → upload"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Drivers",
+      "items": [
+        "A: your Claude Code writes, subagents critique",
+        "B: Messages API workers ×N, optional Batches"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Guards",
+      "items": [
+        "Scoped runner token · leases · idempotent complete",
+        "Validate twice · claude -p tool allowlist · kill switch"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "Plugin Structure": {
+      "source": "anthropics/claude-code",
+      "sourceType": "github",
+      "skillPath": "plugins/plugin-dev/skills/plugin-structure/SKILL.md",
+      "computedHash": "c4e9b3ea36efad4ab599465aaac71f81dc3320a183920678fe1587181c446b07"
+    },
+    "archify": {
+      "source": "tt-a1i/archify",
+      "sourceType": "github",
+      "skillPath": "archify/SKILL.md",
+      "computedHash": "2dafa540bb19ed1d2ea032b071b4f617036d5166b3575a24545bd626e3d8e499"
+    }
+  }
+}

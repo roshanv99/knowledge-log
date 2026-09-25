@@ -1,0 +1,8 @@
+{
+  "name": "knowledge-log",
+  "version": "0.1.0",
+  "description": "Tools for knowledge-log: the kl CLI wrapper, the pipeline prompts, and a status command. MCQ generation runs through the project skill /mcq-generation.",
+  "author": {
+    "name": "Roshan Varghese"
+  }
+}

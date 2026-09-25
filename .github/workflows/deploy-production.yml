@@ -1,0 +1,129 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate deploy secrets
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          RCLONE_CONFIG_B64: ${{ secrets.RCLONE_CONFIG_B64 }}
+        run: |
+          missing=()
+          for name in SSH_PRIVATE_KEY SSH_HOST SSH_USER DEPLOY_PATH RCLONE_CONFIG_B64; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then
+              missing+=("$name")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing GitHub Actions secrets: ${missing[*]}"
+            echo "Add them under Settings → Secrets and variables → Actions (see deploy/HOSTINGER.md)."
+            exit 1
+          fi
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+        run: |
+          install -m 0700 -d ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Force IPv4 — GitHub runners often fail with "Network is unreachable" on IPv6.
+          ssh-keyscan -4 -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Test SSH connectivity
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          echo "Testing SSH to ${SSH_USER}@${SSH_HOST} (IPv4)..."
+          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o ConnectTimeout=15 \
+            "${SSH_USER}@${SSH_HOST}" "echo connected"
+
+      - name: Sync deploy scripts
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" "mkdir -p /tmp/knowledge-log-ci-deploy"
+          scp -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            deploy/backup.sh deploy/ci-deploy.sh \
+            "${SSH_USER}@${SSH_HOST}:/tmp/knowledge-log-ci-deploy/"
+
+      - name: Install rclone config on server
+        env:
+          RCLONE_CONFIG_B64: ${{ secrets.RCLONE_CONFIG_B64 }}
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          set -euo pipefail
+          cleaned="$(printf '%s' "$RCLONE_CONFIG_B64" | tr -d '\n\r\t ')"
+
+          if printf '%s' "$cleaned" | grep -q '^\[gdrive\]'; then
+            echo "RCLONE_CONFIG_B64 looks like raw rclone.conf text, not base64."
+            echo "Re-create the secret (macOS):"
+            echo "  base64 -i ~/.config/rclone/rclone.conf | tr -d '\n' | gh secret set RCLONE_CONFIG_B64"
+            exit 1
+          fi
+
+          if ! printf '%s' "$cleaned" | grep -Eq '^[A-Za-z0-9+/=]+$'; then
+            echo "RCLONE_CONFIG_B64 contains invalid characters (must be base64 only)."
+            exit 1
+          fi
+
+          if ! printf '%s' "$cleaned" | base64 -d > /tmp/rclone.conf; then
+            echo "Failed to base64-decode RCLONE_CONFIG_B64."
+            exit 1
+          fi
+
+          if ! grep -q '^\[gdrive\]' /tmp/rclone.conf; then
+            echo "Decoded rclone.conf is missing a [gdrive] section."
+            exit 1
+          fi
+
+          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" "mkdir -p ~/.config/rclone && chmod 700 ~/.config/rclone"
+          scp -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            /tmp/rclone.conf "${SSH_USER}@${SSH_HOST}:~/.config/rclone/rclone.conf"
+          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" "chmod 600 ~/.config/rclone/rclone.conf"
+          rm -f /tmp/rclone.conf
+
+      - name: Backup database and deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" \
+            "export DEPLOY_PATH='${DEPLOY_PATH}' CI_DEPLOY_DIR=/tmp/knowledge-log-ci-deploy && cd '${DEPLOY_PATH}' && bash /tmp/knowledge-log-ci-deploy/ci-deploy.sh"
+
+      # Refresh the shared edge proxy (hostinger-api-gateway) over the same SSH session that
+      # just deployed this app — see ~/Projects/api-gateway's log-book precedent for why this
+      # goes over SSH rather than a cross-repo repository_dispatch (no extra PAT to issue).
+      - name: Refresh the shared gateway
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+        run: |
+          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "${SSH_USER}@${SSH_HOST}" \
+            "export DEPLOY_PATH=/root/hostinger-api-gateway && bash /root/hostinger-api-gateway/deploy/ci-deploy.sh"

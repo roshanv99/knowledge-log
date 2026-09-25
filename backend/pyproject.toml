@@ -1,0 +1,25 @@
+[project]
+name = "kl-backend"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.35",
+    "django>=6.1.1",
+    "django-cors-headers>=4.9.0",
+    "djangorestframework>=3.18.1",
+    "gunicorn>=23.0.0",
+    "psycopg[binary]>=3.3.6",
+    "pypdf>=6.19.0",
+    "python-dotenv>=1.2.3",
+    "whitenoise>=6.8.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+testpaths = ["quiz/tests", "content/tests", "pipeline/tests"]

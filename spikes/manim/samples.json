@@ -1,0 +1,102 @@
+[
+  {
+    "id": "docker-build-cache",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      100
+    ],
+    "title": "Docker build cache: order layers from least to most frequently changed",
+    "focus": "Only section 2, 'Maximizing Docker's Build Cache'. Ignore the multi-stage builds section on the same page."
+  },
+  {
+    "id": "nginx-listener-acceptor-reader",
+    "pdf": "NGINX.pdf",
+    "pages": [
+      5
+    ],
+    "title": "Listener, acceptor and reader: how a backend handles connections"
+  },
+  {
+    "id": "docker-network-drivers",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      105
+    ],
+    "title": "Docker network drivers: bridge, host and overlay",
+    "focus": "The three drivers, how each works and when to use it. Skip anything beyond the table if space is tight."
+  },
+  {
+    "id": "k8s-requests-vs-limits",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      108,
+      109
+    ],
+    "title": "Kubernetes resource requests vs limits",
+    "focus": "Requests as the scheduler's guaranteed minimum vs limits as the ceiling, and what happens when a Pod exceeds its memory vs CPU limit."
+  },
+  {
+    "id": "k8s-cpu-throttling",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      109
+    ],
+    "title": "How CPU throttling silently hurts latency",
+    "focus": "Only section 3: the 100ms CFS period, a 200m limit meaning 20ms per period, and the burst example that stalls requests."
+  },
+  {
+    "id": "k8s-probes",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      111,
+      112
+    ],
+    "title": "Startup, liveness and readiness probes",
+    "focus": "What each of the three probes checks and what Kubernetes does when it fails. Skip the cascading-failure scenario."
+  },
+  {
+    "id": "k8s-qos-eviction",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      120,
+      121
+    ],
+    "title": "QoS classes decide which Pods get evicted first",
+    "focus": "MemoryPressure eviction and the three QoS classes (BestEffort, Burstable, Guaranteed) with how each is assigned. Skip PriorityClasses and taints."
+  },
+  {
+    "id": "k8s-deploy-strategies",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      124
+    ],
+    "title": "Rolling, blue/green and canary deployments",
+    "focus": "How each strategy works with its main pro and con. Skip the payment-service recommendation if it is not on the page."
+  },
+  {
+    "id": "docker-ephemeral-data",
+    "pdf": "Docker and Kube.pdf",
+    "pages": [
+      103
+    ],
+    "title": "Why a container restart wiped your database",
+    "focus": "The ephemeral writable layer and why mounting a volume keeps the data."
+  },
+  {
+    "id": "nginx-hub-and-spoke",
+    "pdf": "NGINX.pdf",
+    "pages": [
+      10
+    ],
+    "title": "Nginx hub-and-spoke network micro-segmentation"
+  },
+  {
+    "id": "redis-lock-expiry",
+    "pdf": "Redis.pdf",
+    "pages": [
+      76,
+      77
+    ],
+    "title": "Auto-expiring Redis locks and the danger of DEL after the lock expired"
+  }
+]

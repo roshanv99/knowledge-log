@@ -1,0 +1,40 @@
+[project]
+name = "kl"
+version = "0.1.0"
+description = "knowledge-log content pipeline: a deterministic step engine that Claude Code drives (PDF notes -> reviewed MCQs)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.8",
+    "pymupdf>=1.26",
+    "python-dotenv>=1.0",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# Manim reels (kl reel). Heavy (torch via Kokoro), so quiz-only installs skip it.
+reels = [
+    "kokoro>=0.9.4",
+    "manim>=0.21.0",
+    "soundfile>=0.14.0",
+]
+
+# Driver B (kl mcq drive --api): the Claude Messages API with an API key.
+api = [
+    "anthropic>=1.0",
+]
+
+[project.scripts]
+kl = "kl.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

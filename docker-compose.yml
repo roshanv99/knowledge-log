@@ -1,0 +1,75 @@
+# knowledge-log stack: backend + postgres always; nginx + oauth2-proxy added by the
+# gateway/dev overlays below. Loads ./.env (same file config/settings.py and the local `kl`
+# pipeline read) for both compose variable substitution and container environment.
+#
+#   Local Docker + Google SSO:  docker compose -f docker-compose.yml -f docker-compose.gateway.yml up --build
+#   Production (Hostinger):     same gateway file + .env DOMAIN=kl.yourdomain.com — deploy/HOSTINGER.md
+#
+# For plain local dev without Docker, use infra/docker-compose.yml (Postgres only) — this
+# file's `postgres` service is the production shape, on the app's own default port/db name.
+
+name: knowledge-log
+
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  pgdata:
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    networks: [internal]
+    # Loopback only — use an SSH tunnel from DBeaver, not exposed to the internet.
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-kl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kl}
+      POSTGRES_DB: ${POSTGRES_DB:-knowledge_log}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kl} -d ${POSTGRES_DB:-knowledge_log}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  knowledge-log-backend:
+    build:
+      context: ./backend
+    networks: [edge, internal]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change_me_in_production}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-knowledge_log}
+      POSTGRES_USER: ${POSTGRES_USER:-kl}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kl}
+      KL_MAX_MEDIA_BYTES: ${KL_MAX_MEDIA_BYTES:-209715200}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ENDPOINT_URL: ${R2_ENDPOINT_URL:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped

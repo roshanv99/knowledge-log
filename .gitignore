@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+data/
+output/
+logs/
+.kl/
+.DS_Store
+
+# Installed Claude Code skills (third-party, from skills-lock.json — analogous to
+# node_modules vs. package-lock.json: reproducible, not source, not shipped here).
+.agents/
+# Symlinks into the gitignored .agents/skills/ above. The project's own skills
+# (manim-reel-spike, mcq-generation, reel-generation) are real directories, not
+# symlinks, and stay tracked.
+.claude/skills/archify
+.claude/skills/plugin-structure
+ui/.claude/skills/design-taste-frontend
+ui/.claude/skills/frontend-design
+ui/.claude/skills/vercel-react-best-practices
+ui/.claude/skills/web-design-guidelines
+
+# Deploy secrets — real values live on the server, never in git.
+deploy/oauth2-proxy.env
+deploy/oauth2-proxy.env.local
+deploy/nginx/certs/*.crt
+deploy/nginx/certs/*.key
