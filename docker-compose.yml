@@ -3,7 +3,12 @@
 # pipeline read) for both compose variable substitution and container environment.
 #
 #   Local Docker + Google SSO:  docker compose -f docker-compose.yml -f docker-compose.gateway.yml up --build
-#   Production (Hostinger):     same gateway file + .env DOMAIN=kl.yourdomain.com — deploy/HOSTINGER.md
+#   Production (Hostinger):     same gateway file, no --build — CI pushes images to GHCR and
+#                                the server only pulls. See deploy/HOSTINGER.md.
+#
+# Every image-backed service below carries both `build:` (so local dev's `--build` still
+# works from source) and `image:` (what production pulls, and what `--build` tags the
+# result as). Nothing on the server ever runs `docker compose build`.
 #
 # For plain local dev without Docker, use infra/docker-compose.yml (Postgres only) — this
 # file's `postgres` service is the production shape, on the app's own default port/db name.
@@ -43,6 +48,7 @@ services:
   knowledge-log-backend:
     build:
       context: ./backend
+    image: ${KL_BACKEND_IMAGE:-ghcr.io/roshanv99/knowledge-log-backend:latest}
     networks: [edge, internal]
     healthcheck:
       test: ["CMD", "python", "-c",

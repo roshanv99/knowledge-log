@@ -1,18 +1,19 @@
 # Deploy knowledge-log on Hostinger
 
 A fresh VPS, separate from the Hetzner box that runs `log-book`/`fitness-log`. It hosts
-knowledge-log behind its own shared edge gateway — a new repo, `hostinger-api-gateway`,
-built the same way as `~/Projects/api-gateway` but starting with one app instead of two. See
-`docs/PLAN.md` and the plan this deploy was built from for the full architecture diagram.
+knowledge-log behind its own shared edge gateway — [`roshanv99/api-gateway-2`](https://github.com/roshanv99/api-gateway-2),
+built the same way as `~/Projects/api-gateway` but on an independent host. See `docs/PLAN.md`
+and the plan this deploy was built from for the full architecture diagram.
 
 The content pipeline (`kl mcq`/`kl reel` — manim, Kokoro, torch) stays on the Mac via
 launchd. Nothing about it is deployed here; it talks to the deployed API over HTTPS with its
 existing runner token.
 
-## 1. Server bootstrap
+**Nothing is built on this box.** GitHub Actions builds both images and pushes them to
+GHCR (`ghcr.io/roshanv99/knowledge-log-{backend,ui}`); the server only ever runs
+`docker compose pull && up -d`. Same convention as every other app on this VPS.
 
-Same as Hetzner (`~/Projects/log-book/deploy/HETZNER.md` §1): Ubuntu, Docker CE +
-docker-compose-plugin, UFW allowing only 22/80/443.
+## 1. Server bootstrap (one-time)
 
 ```bash
 apt update && apt upgrade -y
@@ -26,13 +27,50 @@ apt update && apt install -y docker-ce docker-ce-cli containerd.io docker-compos
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
-ufw enable
+ufw --force enable
 ```
 
 Only **22, 80, 443** should be public. Postgres binds to loopback only (see
 `docker-compose.yml`).
 
-## 2. DNS + TLS
+## 2. The `deploy` user (one-time, shared by every app on this box)
+
+GitHub Actions never deploys as root. If this box doesn't have it yet:
+
+```bash
+# on the server, as root
+adduser --disabled-password --gecos "" deploy
+usermod -aG docker deploy
+mkdir -p /home/deploy/.ssh && chmod 700 /home/deploy/.ssh
+```
+
+Each app gets its own dedicated key, used for nothing else — generate it on your own
+machine, never on the server:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/knowledge-log-deploy -C "knowledge-log-ci-deploy" -N ""
+cat ~/.ssh/knowledge-log-deploy.pub | ssh root@<ip> \
+  "cat >> /home/deploy/.ssh/authorized_keys && chown -R deploy:deploy /home/deploy/.ssh && chmod 600 /home/deploy/.ssh/authorized_keys"
+ssh -i ~/.ssh/knowledge-log-deploy deploy@<ip> docker ps   # verify
+```
+
+## 3. GHCR auth on the server
+
+CI pushes with the built-in `GITHUB_TOKEN` (no extra secret needed for that direction), but
+a package linked to a repo is created **private by default** regardless of the repo's own
+visibility, so the `deploy` user needs its own login to pull:
+
+```bash
+# a classic PAT with read:packages, from https://github.com/settings/tokens
+ssh -i ~/.ssh/knowledge-log-deploy deploy@<ip>
+echo "<PAT>" | docker login ghcr.io -u roshanv99 --password-stdin
+```
+
+(Or, once the first image has been pushed: GitHub → the package's page → Package settings →
+Change visibility → Public. Either works; the login is the more resilient default since it
+doesn't depend on remembering to flip a setting.)
+
+## 4. DNS + TLS
 
 Cloudflare, proxied (orange cloud), pointing at the VPS IPv4:
 
@@ -42,27 +80,30 @@ kl   A   <server-ipv4>   proxied
 
 Cloudflare → SSL/TLS → mode **Full (strict)** → Origin Server → Create Certificate, hostname
 `kl.yourdomain.com` (or a wildcard if more apps join this box later). The cert lives in
-`hostinger-api-gateway/nginx/certs/` — knowledge-log's own nginx never sees it; it only
-listens on plain `:80` and trusts the gateway for TLS (see `deploy/nginx/default.conf.template`).
+`api-gateway-2/nginx/certs/` — knowledge-log's own nginx never sees it; it only listens on
+plain `:80` and trusts the gateway for TLS (see `deploy/nginx/default.conf.template`).
 
-## 3. The shared gateway (once per box)
+## 5. The shared gateway (once per box)
 
 ```bash
-docker network create gateway
-git clone <hostinger-api-gateway repo url> /root/hostinger-api-gateway
-cd /root/hostinger-api-gateway
+mkdir -p /opt/api-gateway-2 && chown deploy:deploy /opt/api-gateway-2
+su - deploy
+git clone https://github.com/roshanv99/api-gateway-2.git /opt/api-gateway-2
+cd /opt/api-gateway-2
 cp deploy/env.example .env   # set KNOWLEDGE_LOG_DOMAIN=kl.yourdomain.com
 install -m 700 -d nginx/certs
-# paste origin.crt / origin.key from step 2
+# paste origin.crt / origin.key from step 4
 docker compose up -d
 curl -s http://localhost/healthz   # -> "gateway ok"
 ```
 
-## 4. knowledge-log app config
+## 6. knowledge-log app config
 
 ```bash
-git clone <knowledge-log repo url> /root/knowledge-log
-cd /root/knowledge-log
+mkdir -p /opt/knowledge-log && chown deploy:deploy /opt/knowledge-log   # as root, once
+su - deploy
+git clone https://github.com/roshanv99/knowledge-log.git /opt/knowledge-log
+cd /opt/knowledge-log
 cp deploy/env.example .env
 cp deploy/oauth2-proxy.env.example deploy/oauth2-proxy.env
 ```
@@ -76,11 +117,15 @@ Credentials → OAuth client ID → Web application; authorized redirect URI
 `https://<DOMAIN>/oauth2/callback`), a generated `OAUTH2_PROXY_COOKIE_SECRET`, and
 `OAUTH2_PROXY_EMAIL_DOMAINS` restricted to your own account.
 
-## 5. First bring-up
+## 7. First bring-up
+
+Before CI exists, or to bootstrap manually — pull the images GHCR already has (or build
+locally once and push, if this is the very first deploy):
 
 ```bash
-cd /root/knowledge-log
-docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d --build
+cd /opt/knowledge-log
+docker compose -f docker-compose.yml -f docker-compose.gateway.yml pull
+docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d
 docker compose -f docker-compose.yml -f docker-compose.gateway.yml exec knowledge-log-backend python manage.py migrate
 docker compose -f docker-compose.yml -f docker-compose.gateway.yml exec knowledge-log-backend python manage.py runner_token "kl@$(hostname)"
 ```
@@ -97,38 +142,39 @@ curl -s https://<DOMAIN>/api/health
 
 Visiting `https://<DOMAIN>/` should redirect to Google sign-in.
 
-## 6. GitHub Actions secrets
+## 8. GitHub Actions secrets
 
-Same four as log-book (Settings → Secrets and variables → Actions):
+Settings → Secrets and variables → Actions, on `roshanv99/knowledge-log`:
 
-| Secret | Description |
+| Secret | Value |
 |--------|--------------|
-| `SSH_PRIVATE_KEY` | Deploy key with access to the server |
+| `SSH_PRIVATE_KEY` | contents of `~/.ssh/knowledge-log-deploy` (the private key) |
 | `SSH_HOST` | Server IPv4 |
-| `SSH_USER` | e.g. `root` |
-| `DEPLOY_PATH` | `/root/knowledge-log` |
+| `SSH_USER` | `deploy` |
+| `DEPLOY_PATH` | `/opt/knowledge-log` |
 | `RCLONE_CONFIG_B64` | `base64 -i ~/.config/rclone/rclone.conf \| tr -d '\n'` after `rclone config` creates a `gdrive` remote |
 
-Push to `main` to prove the automated path: `.github/workflows/deploy-production.yml` backs
-up, deploys, migrates, and refreshes `hostinger-api-gateway` over the same SSH session.
+Push to `main` to prove the automated path: `.github/workflows/deploy-production.yml`
+builds both images, pushes them to GHCR, then over SSH backs up, pulls, migrates, and
+refreshes `api-gateway-2` in the same session.
 
-## 7. Backups
+## 9. Backups
 
 Daily cron (installed by every deploy, or manually via
-`sudo bash deploy/install-backup-cron.sh /root/knowledge-log`) dumps Postgres and uploads to
+`sudo bash deploy/install-backup-cron.sh /opt/knowledge-log`) dumps Postgres and uploads to
 `gdrive:knowledge-log-backups/`. Logs: `/var/log/knowledge-log-backup.log`.
 
 R2 media (reel MP4s/posters) is not separately backed up — R2 is itself durable, and source
 notes/scripts live on the Mac.
 
-## 8. Disk space
+## 10. Disk space
 
-If `docker compose up --build` fails with "No space left on device":
+Since nothing builds on the server, disk pressure here is unlikely — but pulled images do
+accumulate old layers over time:
 
 ```bash
-docker builder prune -af
 docker image prune -af
 docker container prune -f
 ```
 
-`ci-deploy.sh` runs the first two before every rebuild already.
+`ci-deploy.sh` prunes dangling images after every pull already.

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Remote deploy entrypoint: backup → git pull → rebuild → migrate.
+# Remote deploy entrypoint: backup → git pull → pull images from GHCR → migrate.
 # Invoked from GitHub Actions over SSH (see .github/workflows/deploy-production.yml).
+#
+# CI builds and pushes the images; this script never builds anything — it only pulls, the
+# same convention as every other app on this box (see deploy/HOSTINGER.md).
 
 set -euo pipefail
 
@@ -24,12 +27,14 @@ git reset --hard origin/main
 
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.gateway.yml)
 
-echo "ci-deploy.sh: pruning unused Docker cache (prevents disk-full build failures)"
-docker builder prune -af >/dev/null 2>&1 || true
+echo "ci-deploy.sh: pulling latest images from GHCR"
+"${COMPOSE[@]}" pull
+
+echo "ci-deploy.sh: pruning dangling images (old SHA-tagged layers no container references any more)"
 docker image prune -af >/dev/null 2>&1 || true
 
-echo "ci-deploy.sh: rebuilding and starting services"
-"${COMPOSE[@]}" up -d --build
+echo "ci-deploy.sh: starting services"
+"${COMPOSE[@]}" up -d
 
 echo "ci-deploy.sh: recreating nginx (template → conf is rendered at container start)"
 "${COMPOSE[@]}" up -d --force-recreate --no-deps nginx

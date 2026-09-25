@@ -5,7 +5,8 @@
 #   cp deploy/oauth2-proxy.env.example deploy/oauth2-proxy.env
 #   # fill in .env and deploy/oauth2-proxy.env
 #   docker network create gateway   # once, if not already created by the gateway repo
-#   docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d --build   # local
+#   docker compose -f docker-compose.yml -f docker-compose.gateway.yml up -d           # production (pulls from GHCR)
 
 services:
   oauth2-proxy:
@@ -21,6 +22,7 @@ services:
   nginx:
     build:
       context: ./ui
+    image: ${KL_UI_IMAGE:-ghcr.io/roshanv99/knowledge-log-ui:latest}
     networks:
       edge:
       internal:
