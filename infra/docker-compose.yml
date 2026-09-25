@@ -1,5 +1,11 @@
 # Local Postgres for knowledge-log. Port 5434 avoids SRG (5433) and Wardrobe Log (5432).
-name: knowledge-log
+#
+# Deliberately a different compose project name than the root docker-compose.yml
+# (production shape). Both once used `name: knowledge-log` + a `pgdata:` volume, which
+# Compose resolves to the identical volume name `knowledge-log_pgdata` — a `down -v` while
+# testing the production compose files silently deleted this local dev database. Never let
+# these collide again.
+name: knowledge-log-dev
 
 services:
   postgres:
