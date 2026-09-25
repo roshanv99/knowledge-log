@@ -28,7 +28,9 @@ mkdir -p "$LOG_DIR"
 NEW_LINE="0 0 * * * cd ${DEPLOY_PATH} && bash deploy/backup.sh >> ${LOG_FILE} 2>&1 ${MARKER}"
 {
   echo "CRON_TZ=${CRON_TZ}"
-  (crontab -l 2>/dev/null || true) | grep -vF "$MARKER" | grep -v '^CRON_TZ='
+  # grep -v exits 1 when it matches nothing to remove — true on a first install (no crontab
+  # yet, or none of these lines in it yet). That's not a failure here, so `|| true` it.
+  (crontab -l 2>/dev/null || true) | { grep -vF "$MARKER" || true; } | { grep -v '^CRON_TZ=' || true; }
   echo "$NEW_LINE"
 } | crontab -
 
