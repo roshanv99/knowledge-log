@@ -1,12 +1,13 @@
 """`kl` command line. It makes no LLM calls: the `mcq-generation` skill (a Claude Code session)
 does the reading, writing and reviewing, and this CLI does everything else.
 
+    kl mcq wanted                           what `start` would claim next, without claiming it
     kl mcq start [--document NAME]          claim work from the API; prints the first NEXT: step
     kl mcq submit notes|draft|critique FILE  hand in an LLM step's JSON; prints the next step
     kl mcq status                           where the run is (also renews the task's lease)
     kl mcq fail "why" [--no-retry]          give up on the current task
     kl mcq stop [--reason usage_limit]      end the run
-    kl reel start|status|render|fail|stop   the manim reel engine (needs the `reels` extra)
+    kl reel wanted|start|status|render|fail|stop   the manim reel engine (needs the `reels` extra)
     kl reel submit script|script-review|visual FILE
     kl runner poll [--dry-run]              launchd: start a session per kind only if work is wanted
                                              (also reports the notes folder — see kl notes sync)
@@ -14,6 +15,7 @@ does the reading, writing and reviewing, and this CLI does everything else.
     kl docs / kl status                     what's selected in Manage notes / pipeline activity
 """
 
+import json
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -87,6 +89,13 @@ def _run(action) -> None:
         raise typer.Exit(1) from None
 
 
+def _wanted(kind: str) -> str:
+    """What `start` would claim next, without claiming it — so a driver (notably a cloud
+    routine, which has no local copy of the notes folder) can fetch the right PDF first."""
+    want = _api().wanted(kind)
+    return json.dumps(want, indent=2) if want else f"{kind}: nothing wanted."
+
+
 def _document_id(name: str) -> int:
     notes = _api().notes()["notes"]
     matches = [n for n in notes if name.lower() in n["filename"].lower()]
@@ -94,6 +103,12 @@ def _document_id(name: str) -> int:
         found = ", ".join(n["filename"] for n in matches) or "none"
         raise EngineError(f"'{name}' matched {len(matches)} PDFs in Manage notes ({found}).")
     return matches[0]["id"]
+
+
+@mcq.command("wanted")
+def mcq_wanted() -> None:
+    """What `start` would claim next, without claiming it (document, folder, pages)."""
+    _run(lambda: _wanted("quiz"))
 
 
 @mcq.command("start")
@@ -154,6 +169,12 @@ def mcq_drive(
     engine = Engine(s, _api(s), s.work_dir / "api")
     driver = ApiDriver(engine, anthropic.Anthropic(), model or os.environ.get("KL_API_MODEL", DEFAULT_MODEL))
     _run(lambda: driver.run(_document_id(document) if document else None))
+
+
+@reel.command("wanted")
+def reel_wanted() -> None:
+    """What `start` would claim next, without claiming it (document, folder, pages)."""
+    _run(lambda: _wanted("reel"))
 
 
 @reel.command("start")

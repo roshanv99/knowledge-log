@@ -18,7 +18,7 @@ from config.storage import get_storage
 from content import notes as notes_module
 from content.models import Chunk, Document, GenerationRun, GenerationTask, Kind, Question, Reel
 from pipeline import planner
-from pipeline.models import RunRequest
+from pipeline.models import Runner, RunRequest
 from quiz.models import Settings
 
 Status = GenerationTask.Status
@@ -284,8 +284,11 @@ def finish(run: GenerationRun, stop_reason: str, usage: dict | None) -> Generati
     return run
 
 
-def wanted(kind: str) -> dict | None:
-    """What the runner's poll should start, if anything. Nothing costs Claude usage until this says so."""
+def wanted(kind: str, runner: Runner) -> dict | None:
+    """What the runner's poll should start, if anything. Nothing costs Claude usage until this
+    says so. `runner` decides which auto-run switch applies: a scheduled cloud routine and the
+    local Mac runner are gated independently (Settings.pipeline_auto_cloud vs pipeline_auto),
+    so turning one on doesn't silently start the other."""
     prefs = Settings.load()
     if not prefs.pipeline_enabled:
         return None
@@ -300,7 +303,8 @@ def wanted(kind: str) -> dict | None:
             request.expires_at = timezone.now()
             request.save(update_fields=["expires_at"])
         return None
-    if request is None and not prefs.pipeline_auto:
+    auto = prefs.pipeline_auto_cloud if runner.kind == Runner.RunnerKind.CLOUD_ROUTINE else prefs.pipeline_auto
+    if request is None and not auto:
         return None
     plan = planner.next_plan(kind)
     if isinstance(plan, str):
@@ -310,7 +314,8 @@ def wanted(kind: str) -> dict | None:
         return None
     return {"kind": kind, "reason": "run_request" if request else "schedule",
             "request_id": request.pk if request else None,
-            "document": plan.document.filename, "pages": list(plan.page_range)}
+            "document": plan.document.filename, "folder": plan.document.folder,
+            "pages": list(plan.page_range)}
 
 
 def sync_notes(entries: list[dict], notes_dir: str) -> dict:

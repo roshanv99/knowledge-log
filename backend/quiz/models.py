@@ -66,8 +66,11 @@ class Settings(models.Model):
     questions_per_set = models.IntegerField(default=10, validators=[MinValueValidator(1), MaxValueValidator(50)])
     # Pipeline switches (docs/PIPELINE_DB.md): a kill switch and caps on how much one day can run.
     pipeline_enabled = models.BooleanField(default=True)
-    # Off: runs start only from "Run now". On: the runner's poll also starts one whenever work is waiting.
+    # Off: runs start only from "Run now". On: the local Mac runner's poll also starts one
+    # whenever work is waiting. Separate from pipeline_auto_cloud (a scheduled cloud routine's
+    # own switch) so turning one on doesn't silently turn the other on too.
     pipeline_auto = models.BooleanField(default=False)
+    pipeline_auto_cloud = models.BooleanField(default=False)
     max_tasks_per_run = models.IntegerField(default=10, validators=[MinValueValidator(1), MaxValueValidator(100)])
     max_runs_per_day = models.IntegerField(default=6, validators=[MinValueValidator(1), MaxValueValidator(48)])
     # Total reels to make (0 = no limit). Reels are costly, so the pipeline stops once there are this many.

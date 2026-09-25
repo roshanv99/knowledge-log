@@ -65,7 +65,7 @@ def task_payload(task: GenerationTask) -> dict:
         "chunk": {"id": chunk.pk, "page_start": chunk.page_start, "page_end": chunk.page_end,
                   "status": chunk.status, "title": chunk.title, "notes": chunk.notes},
         "document": {"id": document.pk, "filename": document.filename, "path": document.path,
-                     "page_count": document.page_count},
+                     "folder": document.folder, "page_count": document.page_count},
     }
 
 
@@ -74,7 +74,7 @@ def task_payload(task: GenerationTask) -> dict:
 @runner_endpoint(["GET"])
 def wanted(request: Request) -> Response:
     kind = request.query_params.get("kind", "quiz")
-    want = services.wanted(kind)
+    want = services.wanted(kind, request.user)
     return Response(want) if want else Response(status=status.HTTP_204_NO_CONTENT)
 
 

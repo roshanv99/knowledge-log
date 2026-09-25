@@ -196,10 +196,15 @@ class StepEngine:
         self._new_task(task)
         st["task"] = task
 
-        pdf = Path(document["path"])
+        # Prefer this machine's own notes_dir over the recorded path: the path was recorded by
+        # whichever machine first discovered the file (kl notes sync), and isn't portable —
+        # notably, a cloud routine's sandbox has no such path at all. Falling back to the
+        # literal path keeps local dev working when it still points at a real folder.
+        local = self.settings.notes_dir / document.get("folder", "") / document["filename"]
+        pdf = local if local.exists() else Path(document["path"])
         if not pdf.exists():
             self.save(st)
-            return self.fail(f"PDF not found at {pdf}", retryable=False)
+            return self.fail(f"PDF not found at {local} or {document['path']}", retryable=False)
         pages = render_pages(pdf, chunk["page_start"], chunk["page_end"],
                              output.pages_dir(self.settings, document["filename"]), self.settings.page_dpi)
         task["pages"] = [str(p.image_path) for p in pages]

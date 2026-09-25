@@ -24,8 +24,15 @@ def make_pdf(path: Path, pages: int) -> Path:
 class FakeApi:
     """Hands out queued chunks as tasks and records every call."""
 
-    def __init__(self, pdf: Path, chunks: list[tuple[int, int]], read: dict | None = None):
+    def __init__(self, pdf: Path, chunks: list[tuple[int, int]], read: dict | None = None,
+                 doc_path: str | None = None, folder: str = ""):
         self.pdf, self.queue, self.read = pdf, list(chunks), read or {}
+        # The recorded path can differ from where the real file actually is — e.g. stale, or
+        # (see test_resolves_pdf_relative_to_notes_dir_when_present) simulating a machine that
+        # only has the file under its own notes_dir, not at the originally-recorded path.
+        # None (not resolved here) so tests that reassign api.pdf after construction (e.g.
+        # test_missing_pdf_fails_without_retry) still take effect — claim() reads self.pdf live.
+        self.doc_path, self.folder = doc_path, folder
         self.calls: list[tuple] = []
         self.completed: dict[int, dict] = {}
         self.lose: set[str] = set()  # method names that raise LeaseLost once
@@ -52,7 +59,8 @@ class FakeApi:
             "id": self.next_id, "kind": "quiz", "attempt": 1, "lease_expires_at": None,
             "chunk": {"id": self.next_id, "page_start": start, "page_end": end,
                       "status": "read" if notes else "unread", "title": notes and notes["title"], "notes": notes},
-            "document": {"id": 1, "filename": self.pdf.name, "path": str(self.pdf), "page_count": 12}}, "reason": None}
+            "document": {"id": 1, "filename": self.pdf.name, "path": self.doc_path or str(self.pdf),
+                        "folder": self.folder, "page_count": 12}}, "reason": None}
 
     def heartbeat(self, task_id, run_id, stage, detail=None):
         self._maybe_lose("heartbeat")
@@ -101,11 +109,14 @@ def question(n: int, pages=(1,)) -> dict:
 @pytest.fixture
 def env(tmp_path):
     pdf = make_pdf(tmp_path / "Docker.pdf", 12)
+    # notes_dir is isolated too (not left at whatever KL_NOTES_DIR/.env resolves to on the
+    # machine running the tests) — claim() tries it first, and every other test here relies on
+    # it being empty so they exercise the literal-path fallback deliberately, not by luck.
     settings = replace(load_settings(), output_dir=tmp_path / "output", work_dir=tmp_path / ".kl",
-                       logs_dir=tmp_path / "logs")
+                       logs_dir=tmp_path / "logs", notes_dir=tmp_path / "notes")
 
-    def make(chunks=((1, 4),), read=None):
-        api = FakeApi(pdf, list(chunks), read)
+    def make(chunks=((1, 4),), read=None, doc_path=None, folder=""):
+        api = FakeApi(pdf, list(chunks), read, doc_path=doc_path, folder=folder)
         return Engine(settings, api, settings.work_dir), api
     return make
 
@@ -263,11 +274,26 @@ def test_resume_or_restart(env):
     assert "Started run 2" in out and api.runs == 2
 
 
+def test_resolves_pdf_relative_to_notes_dir_when_present(env):
+    """A cloud routine's sandbox has no copy of the file at the recorded path (that path only
+    ever made sense on the machine that first discovered it) — it places the PDF under its own
+    notes_dir instead, and claim() must prefer that over the stale recorded path."""
+    engine, api = env(doc_path="/no/such/machine/has/this/path.pdf", folder="Tech")
+    notes_folder = engine.settings.notes_dir / "Tech"
+    notes_folder.mkdir(parents=True)
+    make_pdf(notes_folder / api.pdf.name, 12)  # same filename, real content, under notes_dir/folder
+    out = engine.start()
+    assert "PDF not found" not in out
+    assert not any(c[0] == "fail" for c in api.calls)
+    assert engine.load()["task"]["chunk"]["page_start"] == 1  # claimed and proceeded normally
+
+
 def test_missing_pdf_fails_without_retry(env, tmp_path):
     engine, api = env()
     api.pdf = tmp_path / "gone.pdf"
     out = engine.start()
-    assert ("fail", 101, f"PDF not found at {tmp_path / 'gone.pdf'}", False) in api.calls
+    fail_call = next(c for c in api.calls if c[0] == "fail")
+    assert fail_call[1] == 101 and str(tmp_path / "gone.pdf") in fail_call[2] and fail_call[3] is False
     assert "range_done" in out
 
 

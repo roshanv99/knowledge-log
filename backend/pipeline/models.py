@@ -24,6 +24,7 @@ class Runner(models.Model):
     class RunnerKind(models.TextChoices):
         CLAUDE_SESSION = "claude-session"
         API_WORKER = "api-worker"
+        CLOUD_ROUTINE = "cloud-routine"  # a scheduled claude.ai routine, not the local Mac runner
 
     name = models.CharField(max_length=128, unique=True)  # e.g. "kl@macbook"
     kind = models.CharField(max_length=16, choices=RunnerKind)

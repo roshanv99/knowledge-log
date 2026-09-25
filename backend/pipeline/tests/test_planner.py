@@ -5,11 +5,17 @@ from django.utils import timezone
 
 from content.models import Chunk, Document, GenerationRun, GenerationTask, NoteScope, Question
 from pipeline import planner, services
+from pipeline.models import Runner
 from pipeline.planner import Reason
 from quiz.models import Settings
 
 pytestmark = pytest.mark.django_db
 Status = GenerationTask.Status
+
+
+def runner(kind=Runner.RunnerKind.CLAUDE_SESSION) -> Runner:
+    """services.wanted() only reads .kind, so an unsaved instance is enough."""
+    return Runner(kind=kind)
 
 
 @pytest.fixture
@@ -238,27 +244,43 @@ def test_idle_runs_do_not_use_up_the_daily_cap(make_doc):
 
 def test_wanted_needs_a_request_unless_auto(make_doc):
     make_doc("A.pdf", 8)
-    assert services.wanted("quiz") is None
+    assert services.wanted("quiz", runner()) is None
     request = services.request_run("quiz")
     assert services.request_run("quiz") == request  # one open request per kind
-    want = services.wanted("quiz")
-    assert want["reason"] == "run_request" and want["pages"] == [1, 4]
+    want = services.wanted("quiz", runner())
+    assert want["reason"] == "run_request" and want["pages"] == [1, 4] and want["folder"] == ""
     run = new_run()
     request.refresh_from_db()
     assert request.consumed_by_run == run
-    assert services.wanted("quiz") is None  # a run is active
+    assert services.wanted("quiz", runner()) is None  # a run is active
     services.finish(run, "done", None)
 
     prefs = Settings.load()
     prefs.pipeline_auto = True
     prefs.save()
-    assert services.wanted("quiz")["reason"] == "schedule"
+    assert services.wanted("quiz", runner())["reason"] == "schedule"
+
+
+def test_local_and_cloud_auto_are_independent_switches(make_doc):
+    make_doc("A.pdf", 8)
+    local, cloud = runner(Runner.RunnerKind.CLAUDE_SESSION), runner(Runner.RunnerKind.CLOUD_ROUTINE)
+
+    prefs = Settings.load()
+    prefs.pipeline_auto = True
+    prefs.save()
+    assert services.wanted("quiz", local)["reason"] == "schedule"
+    assert services.wanted("quiz", cloud) is None  # pipeline_auto_cloud is still off
+
+    prefs.pipeline_auto, prefs.pipeline_auto_cloud = False, True
+    prefs.save()
+    assert services.wanted("quiz", local) is None  # pipeline_auto is now off
+    assert services.wanted("quiz", cloud)["reason"] == "schedule"
 
 
 def test_request_with_nothing_to_do_is_closed(make_doc):
     make_doc("Off.pdf", 4, selected=False)
     services.request_run("quiz")
-    assert services.wanted("quiz") is None
+    assert services.wanted("quiz", runner()) is None
     assert services.open_request("quiz") is None
 
 
