@@ -73,7 +73,7 @@ class GenerationRun(models.Model):
     # Every runner call touches this; a run silent for longer than the lease is abandoned.
     last_seen_at = models.DateTimeField(default=timezone.now)
     finished_at = models.DateTimeField(null=True, blank=True)
-    stop_reason = models.CharField(max_length=32, null=True, blank=True)
+    stop_reason = models.CharField(max_length=200, null=True, blank=True)
     tasks_done = models.IntegerField(default=0)
     questions_made = models.IntegerField(default=0)
     reels_made = models.IntegerField(default=0)

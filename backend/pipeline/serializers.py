@@ -92,7 +92,7 @@ class FailInput(RunCallInput):
 
 
 class FinishInput(serializers.Serializer):
-    stop_reason = serializers.CharField(max_length=32)
+    stop_reason = serializers.CharField(max_length=200)
     usage = serializers.DictField(required=False, allow_null=True, default=None)
 
 

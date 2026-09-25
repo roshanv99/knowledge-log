@@ -32,6 +32,7 @@ class FakeApi:
         self.completed: dict[int, dict] = {}
         self.lose: set[str] = set()  # method names that raise LeaseLost once
         self.next_id, self.runs = 100, 0
+        self.finish_error: ApiError | None = None
 
     def _maybe_lose(self, name):
         if name in self.lose:
@@ -90,6 +91,8 @@ class FakeApi:
 
     def finish(self, run_id, stop_reason, usage=None):
         self.calls.append(("finish", run_id, stop_reason))
+        if self.finish_error is not None:
+            raise self.finish_error
         return {}
 
     def wanted(self, kind):
@@ -295,6 +298,24 @@ def test_stop_finishes_the_run(env):
     assert "usage_limit" in engine.stop("usage_limit")
     assert ("finish", 1, "usage_limit") in api.calls and engine.load() is None
 
+
+
+def test_finish_failing_on_the_server_is_reported_not_hidden(env):
+    """A finish() call the server rejects (e.g. a validation error) must not be swallowed as
+    "already closed" — that leaves the run open on the server, blocking every future run of
+    this kind, with nothing telling anyone. Only 404/409 (genuinely already gone) are quiet."""
+    engine, api = env()
+    engine.start()
+    api.finish_error = ApiError(400, "stop_reason too long")
+    out = engine.stop("a very specific, unusually long stop reason describing what went wrong")
+    assert "WARNING" in out and "still show as in progress" in out
+
+    api.finish_error = ApiError(404, "not found")
+    engine2, api2 = env()
+    engine2.start()
+    api2.finish_error = ApiError(404, "not found")
+    out2 = engine2.stop("gone")
+    assert "WARNING" not in out2
 
 def test_runner_poll_starts_one_restricted_session(env, tmp_path):
     engine, api = env()

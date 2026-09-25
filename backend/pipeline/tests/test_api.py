@@ -2,7 +2,7 @@ import pytest
 from django.core.management import call_command
 from rest_framework.test import APIClient
 
-from content.models import Document, GenerationTask, NoteScope, Question
+from content.models import Document, GenerationRun, GenerationTask, NoteScope, Question
 from pipeline.models import Runner
 
 pytestmark = pytest.mark.django_db
@@ -77,6 +77,18 @@ def test_full_run_through_the_api(document, mac):
     assert finished.data["tasks_done"] == 1 and finished.data["questions_made"] == 1
     document.refresh_from_db()
     assert document.last_processed_page == 4
+
+
+def test_finish_accepts_a_descriptive_stop_reason(document, mac):
+    """A free-text reason (e.g. "environment_blocked: huggingface.co denied by egress proxy
+    policy (403)") must fit: a rejected finish leaves the run open forever, blocking every
+    future run of this kind, since wanted() refuses to start one while any run is unfinished."""
+    run_id = start(mac)
+    reason = "environment_blocked: huggingface.co (Kokoro TTS model download) denied by egress proxy org policy (403)"
+    assert len(reason) > 32
+    response = mac.post(f"{API}/runs/{run_id}/finish", {"stop_reason": reason}, format="json")
+    assert response.status_code == 200 and response.data["stop_reason"] == reason
+    assert not GenerationRun.objects.get(pk=run_id).finished_at is None
 
 
 def test_complete_rejects_bad_questions(document, mac):

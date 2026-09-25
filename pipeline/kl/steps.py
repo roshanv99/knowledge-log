@@ -248,16 +248,22 @@ class StepEngine:
         return line + "\n" + self._claim_next(st)
 
     def _finish(self, st: dict, reason: str, usage: dict | None, *, notify: bool = True, why: str = "") -> str:
+        warning = ""
         if notify:
             try:
                 self.api.finish(st["run_id"], reason, usage)
-            except (LeaseLost, ApiError):
-                pass  # already closed on the server
+            except ApiError as e:
+                # 404/409: the server already considers this run gone — not a failure to report.
+                # Anything else (e.g. a rejected stop_reason) means the server still thinks this
+                # run is open, which blocks a new one from starting; surface it, don't hide it.
+                if e.status not in (404, 409):
+                    warning = (f"\nWARNING: telling the server this run is over failed ({e}) — it may still "
+                              f"show as in progress there. Tell the user.")
         st["stop_reason"] = reason
         report = self._run_report(st)
         self._archive(st, reason)
         detail = f" ({why})" if why else ""
-        return (f"Run {st['run_id']} finished: {reason}{detail}. {self._totals(st)}. Review: {report}\n"
+        return (f"Run {st['run_id']} finished: {reason}{detail}. {self._totals(st)}. Review: {report}{warning}\n"
                 f"NEXT: nothing — the run is over. Tell the user the stop reason and the review path.")
 
     def _lost(self, st: dict) -> str:
