@@ -34,6 +34,9 @@ echo "ci-deploy.sh: pruning dangling images (old SHA-tagged layers no container 
 docker image prune -af >/dev/null 2>&1 || true
 
 echo "ci-deploy.sh: starting services"
+# Created here, not by Docker: a bind-mount source Docker creates is root-owned, and
+# deploy/notes-sync.sh (running as this user) has to write into it.
+mkdir -p notes
 "${COMPOSE[@]}" up -d
 
 echo "ci-deploy.sh: recreating nginx (template → conf is rendered at container start)"

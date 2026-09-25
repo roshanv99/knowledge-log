@@ -78,6 +78,11 @@ services:
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
       R2_PUBLIC_BASE_URL: ${R2_PUBLIC_BASE_URL:-}
+      # The server's mirror of the Google Drive notes folder (deploy/notes-sync.sh). Set here,
+      # not from .env, whose KL_NOTES_DIR is the Mac's path for the local pipeline.
+      KL_NOTES_DIR: /notes
+    volumes:
+      - ./notes:/notes:ro
     depends_on:
       postgres:
         condition: service_healthy

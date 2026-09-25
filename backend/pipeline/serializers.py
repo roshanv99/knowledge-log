@@ -98,18 +98,3 @@ class FinishInput(serializers.Serializer):
 
 class RequestInput(serializers.Serializer):
     kind = serializers.ChoiceField(choices=Kind.choices)
-
-
-class NotesSyncEntryInput(serializers.Serializer):
-    path = serializers.CharField(max_length=2000)
-    filename = serializers.CharField(max_length=512)
-    file_hash = serializers.CharField(max_length=64)
-    size = serializers.IntegerField(min_value=0)
-    mtime = serializers.FloatField()
-    page_count = serializers.IntegerField(min_value=1)
-    folder = serializers.CharField(max_length=500, allow_blank=True)
-
-
-class NotesSyncInput(serializers.Serializer):
-    notes_dir = serializers.CharField(max_length=500, allow_blank=True)
-    documents = NotesSyncEntryInput(many=True, max_length=2000)

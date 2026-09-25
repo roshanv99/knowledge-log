@@ -7,6 +7,8 @@ output/
 logs/
 .kl/
 .DS_Store
+# The server's mirror of the Drive notes folder (deploy/notes-sync.sh).
+/notes/
 
 # Installed Claude Code skills (third-party, from skills-lock.json — analogous to
 # node_modules vs. package-lock.json: reproducible, not source, not shipped here).

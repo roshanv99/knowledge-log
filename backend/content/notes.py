@@ -4,17 +4,19 @@ Every PDF under KL_NOTES_DIR gets a Document (created here if the pipeline hasn'
 yet) and a NoteScope. A question or reel is in scope when its PDF is selected, its type is
 ticked, and every page it comes from lies inside the chosen range.
 
-Which PDFs currently exist is no longer discovered by scanning a filesystem here: the backend
-and the notes folder aren't necessarily on the same machine once deployed (deploy/HOSTINGER.md).
-The pipeline (which does have real folder access — pipeline/kl/notes_sync.py) reports what it
-finds to `apply_sync_report()` below, called from POST /api/pipeline/notes/sync
-(pipeline/services.py::sync_notes). `list_notes()` here just reads what was last reported.
+Which PDFs exist is decided by `scan()` + `apply_sync_report()`, run by `manage.py sync_notes`
+on a schedule (deploy/notes-sync.sh mirrors the Google Drive folder onto the server first), not
+on every request: a deleted or changed PDF shows up in the app after the next sync.
+`list_notes()` here just reads what the last sync recorded.
 """
 
+import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 
 from django.db.models import QuerySet
 from django.utils import timezone
+from pypdf import PdfReader
 
 from content.models import Chunk, Document, GenerationTask, Kind, NoteScope, Question, Reel
 
@@ -35,8 +37,30 @@ def scope_for(document: Document) -> NoteScope:
         return NoteScope(document=document)
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def scan(notes_dir: Path) -> list[dict]:
+    """Every PDF under notes_dir, as an `apply_sync_report()` entry each."""
+    entries = []
+    for path in sorted(notes_dir.rglob("*.pdf")):
+        stat = path.stat()
+        folder = path.parent.relative_to(notes_dir)
+        entries.append({
+            "path": str(path), "filename": path.name, "file_hash": _sha256(path),
+            "size": stat.st_size, "mtime": stat.st_mtime, "page_count": len(PdfReader(path).pages),
+            "folder": "" if folder == Path(".") else str(folder),
+        })
+    return entries
+
+
 def apply_sync_report(entries: list[dict]) -> dict:
-    """Register/update every PDF the pipeline reports, then mark anything not reported as no
+    """Register/update every PDF in `entries` (see `scan()`), then mark anything not in it as no
     longer available. `entries`: [{path, filename, file_hash, size, mtime, page_count, folder}].
 
     Same identification rule as before: a PDF's identity is its content hash, not its path, so

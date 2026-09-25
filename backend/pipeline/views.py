@@ -6,8 +6,11 @@ behind the app login once hosted.
 """
 
 from functools import wraps
+from pathlib import Path
 
+from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -15,7 +18,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from content.models import GenerationRun, GenerationTask, Reel
+from content.models import Document, GenerationRun, GenerationTask, Reel
 from pipeline import serializers as s
 from pipeline import services
 from pipeline.auth import IsRunner, RunnerTokenAuthentication
@@ -145,13 +148,16 @@ def fail(request: Request, task_id: int) -> Response:
     return Response({"status": task.status, "attempts": task.attempts})
 
 
-@runner_endpoint(["POST"])
-def sync_notes(request: Request) -> Response:
-    """Every PDF the pipeline currently finds under its KL_NOTES_DIR (content/notes.py,
-    docs/PLAN.md's deployment note on why this can't be discovered on the server itself)."""
-    data = _valid(s.NotesSyncInput, request)
-    result = services.sync_notes(data["documents"], data["notes_dir"])
-    return Response(result)
+@runner_endpoint(["GET"])
+def document_pdf(request: Request, document_id: int):
+    """The PDF itself, for runners that don't have the notes folder (a cloud routine, or a Mac
+    that can't read the Drive folder). Only files inside KL_NOTES_DIR are served."""
+    document = get_object_or_404(Document, pk=document_id, available=True)
+    notes_dir = settings.KL_NOTES_DIR.resolve()
+    path = Path(document.path).resolve()
+    if not path.is_relative_to(notes_dir) or not path.is_file():
+        return Response({"detail": "PDF not on the server."}, status=status.HTTP_404_NOT_FOUND)
+    return FileResponse(path.open("rb"), content_type="application/pdf", filename=document.filename)
 
 
 @runner_endpoint(["POST"])

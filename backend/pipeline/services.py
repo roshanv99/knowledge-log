@@ -319,9 +319,9 @@ def wanted(kind: str, runner: Runner) -> dict | None:
 
 
 def sync_notes(entries: list[dict], notes_dir: str) -> dict:
-    """What the pipeline's `kl notes sync` (or a runner poll) reports: every PDF currently
-    under its KL_NOTES_DIR. See content/notes.py::apply_sync_report for the registration and
-    availability logic this just wraps with the display-string update."""
+    """Every PDF currently under KL_NOTES_DIR (`manage.py sync_notes`). See
+    content/notes.py::apply_sync_report for the registration and availability logic this just
+    wraps with the display-string update."""
     result = notes_module.apply_sync_report(entries)
     prefs = Settings.load()
     if notes_dir and prefs.notes_dir_reported != notes_dir:
