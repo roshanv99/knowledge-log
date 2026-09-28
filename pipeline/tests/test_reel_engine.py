@@ -45,7 +45,10 @@ class FakeMedia:
         video.write_bytes(b"\x00\x00\x00\x18ftypisom")
         timings = [{"end": 8.0 * (i + 1), "overrun": 0.0} for i in range(5)]
         if outcome == "crash":
-            return Render(False, None, "Traceback: boom", 3.0, [], [])
+            # Long with the real cause at the end, like real media.render_scene's trimmed tail
+            # (lots of "Animation N: Partial..." noise, then the actual traceback).
+            return Render(False, None, ("INFO Animation noise\n" * 100) + "NameError: name 'boom' is not defined",
+                          3.0, [], [])
         if outcome == "layout":
             return Render(True, video, "", 9.0, timings, ["beat 2: label off screen"])
         return Render(True, video, "", 9.0, timings, [])
@@ -172,7 +175,12 @@ def test_render_fixes_are_budgeted_per_visual_round(env):
     assert task["stage"] == "scene" and task["fix_round"] == FIX_ROUNDS
     assert "import of" not in (tdir(engine) / "scene-brief.md").read_text()  # the brief shows the latest failure
     scene(engine)  # a 4th failure in this round
-    assert "render fixes used up" in next(c for c in api.calls if c[0] == "fail")[2]
+    fail_error = next(c for c in api.calls if c[0] == "fail")[2]
+    assert "render fixes used up" in fail_error
+    # Regression for a 2026-09-28 bug: the final message kept detail[:600] (the head), but the
+    # actual cause sits at the end of a trimmed traceback (see FakeMedia's "crash" error above and
+    # media._trim_traceback) — the head-truncated message never reached the real error.
+    assert "NameError: name 'boom' is not defined" in fail_error
 
 
 def test_visual_revisions_then_failure(env):

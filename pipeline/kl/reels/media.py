@@ -162,7 +162,11 @@ def render_scene(code: str, beats_json: Path, work: Path) -> RenderResult:
     secs = time.monotonic() - t0
     videos = list((work / "media").glob("videos/**/reel.mp4"))
     if proc.returncode != 0 or not videos or not timing.exists():
-        return RenderResult(False, None, _trim_traceback(proc.stderr + proc.stdout), secs, [], [])
+        # stdout order matters: manim logs one "Animation N: Partial movie file written" INFO
+        # line per animation to stdout (easily hundreds for a multi-beat scene), while the
+        # actual traceback goes to stderr. stdout must come first so _trim_traceback's tail
+        # window lands on the traceback, not stdout's progress spam.
+        return RenderResult(False, None, _trim_traceback(proc.stdout + proc.stderr), secs, [], [])
     data = json.loads(timing.read_text())
     return RenderResult(True, videos[0], "", secs, data["timings"], data["layout_issues"])
 

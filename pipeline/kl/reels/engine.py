@@ -252,7 +252,10 @@ class ReelEngine(StepEngine):
         task["fix_round"] += 1
         task["review_log"].append({"step": "render_fix", "attempt": task["attempt_no"], "detail": detail[-2000:]})
         if task["fix_round"] > FIX_ROUNDS:
-            return self.fail(f"render fixes used up ({FIX_ROUNDS}): {detail[:600]}", retryable=False)
+            # The tail, not the head: detail is "RENDER FAILED ... Traceback tail:\n<error>", and
+            # the actual exception is the end of <error> (see media._trim_traceback), not the
+            # opening line.
+            return self.fail(f"render fixes used up ({FIX_ROUNDS}): {detail[-600:]}", retryable=False)
         task["issues"] = [detail]
         self._rewrite_scene_brief(task)
         try:
