@@ -247,3 +247,29 @@ export interface UploadResult {
   note: Note
   outcome: UploadOutcome
 }
+
+// The Following feed (backend/social/): accounts to watch, and what's been found on them.
+
+export type SocialPlatform = 'youtube' | 'instagram'
+
+export interface FollowedAccount {
+  id: number
+  platform: SocialPlatform
+  handle: string
+  active: boolean
+  created_at: string
+}
+
+/** One reel/short found on a followed account, ready to embed (backend/social/views.py `videos`). */
+export interface SocialVideo {
+  id: number
+  platform: SocialPlatform
+  account_handle: string
+  url: string
+  /** The official/public embed src to put in an <iframe>: youtube-nocookie.com or instagram.com/reel/.../embed. */
+  embed_url: string
+  title: string
+  description: string
+  published_at: string | null
+  views: number
+}

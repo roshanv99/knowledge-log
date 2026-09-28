@@ -10,6 +10,8 @@ import type {
   NotesQuery,
   PipelineStatus,
   Settings,
+  SocialPlatform,
+  SocialVideo,
 } from './types'
 
 const keys = {
@@ -21,6 +23,8 @@ const keys = {
   pipeline: ['pipeline', 'status'] as const,
   reels: ['reels'] as const,
   activity: ['activity'] as const,
+  followedAccounts: ['social', 'accounts'] as const,
+  socialVideos: ['social', 'videos'] as const,
 }
 
 // Poll only while the pipeline is doing something (or about to): a run is active or requested.
@@ -148,6 +152,58 @@ export function useRetryTask() {
 
 export function useNoteItems(noteId: number, enabled: boolean) {
   return useQuery({ queryKey: keys.noteItems(noteId), queryFn: () => api.noteItems(noteId), enabled })
+}
+
+export function useFollowedAccounts() {
+  return useQuery({ queryKey: keys.followedAccounts, queryFn: api.followedAccounts })
+}
+
+export function useAddFollowedAccount() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ platform, handle }: { platform: SocialPlatform; handle: string }) =>
+      api.addFollowedAccount(platform, handle),
+    onSuccess: () => client.invalidateQueries({ queryKey: keys.followedAccounts }),
+  })
+}
+
+export function useSetFollowedAccountActive() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, active }: { id: number; active: boolean }) => api.setFollowedAccountActive(id, active),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.followedAccounts })
+      client.invalidateQueries({ queryKey: keys.socialVideos })
+    },
+  })
+}
+
+export function useRemoveFollowedAccount() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => api.removeFollowedAccount(id),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: keys.followedAccounts })
+      client.invalidateQueries({ queryKey: keys.socialVideos })
+    },
+  })
+}
+
+export function useSocialVideos() {
+  return useQuery({ queryKey: keys.socialVideos, queryFn: api.socialVideos })
+}
+
+/** Count one watch of a Following item; the cached feed takes the server's count. */
+export function useRecordSocialView() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (videoId: number) => api.recordSocialView(videoId),
+    onSuccess: ({ views }, videoId) => {
+      client.setQueryData<{ videos: SocialVideo[] }>(keys.socialVideos, (data) =>
+        data && { videos: data.videos.map((v) => (v.id === videoId ? { ...v, views } : v)) },
+      )
+    },
+  })
 }
 
 export function useUpdateScope(noteId: number) {

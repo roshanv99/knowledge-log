@@ -9,4 +9,5 @@ urlpatterns = [
     path("api/", include("quiz.urls")),
     path("api/", include("content.urls")),
     path("api/", include("pipeline.urls")),
+    path("api/", include("social.urls")),
 ]

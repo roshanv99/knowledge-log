@@ -23,6 +23,13 @@ api = [
     "anthropic>=1.0",
 ]
 
+# Following-feed discovery (kl social discover): an unofficial scrape, kept optional so it's
+# never pulled in by a quiz/reel-only install.
+social = [
+    "yt-dlp>=2024.8",
+    "instaloader>=4.13",
+]
+
 [project.scripts]
 kl = "kl.cli:app"
 

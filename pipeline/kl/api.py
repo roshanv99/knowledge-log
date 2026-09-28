@@ -36,6 +36,8 @@ class Api(Protocol):
     def upload_media(self, task_id: int, run_id: int, path: Path, kind: str = "video") -> str: ...
     def fail(self, task_id: int, run_id: int, error: str, retryable: bool) -> dict: ...
     def finish(self, run_id: int, stop_reason: str, usage: dict | None = None) -> dict: ...
+    def list_accounts(self) -> dict: ...
+    def report_videos(self, account_id: int, videos: list[dict]) -> dict: ...
 
 
 class HttpApi:
@@ -135,3 +137,11 @@ class HttpApi:
 
     def finish(self, run_id: int, stop_reason: str, usage: dict | None = None) -> dict:
         return self._call("POST", f"/pipeline/runs/{run_id}/finish", {"stop_reason": stop_reason, "usage": usage})
+
+    # Following-feed discovery (kl social discover). No runner token: same open, single-user
+    # access as /notes and the rest of the app's own API.
+    def list_accounts(self) -> dict:
+        return self._call("GET", "/social/accounts", runner=False)
+
+    def report_videos(self, account_id: int, videos: list[dict]) -> dict:
+        return self._call("POST", f"/social/accounts/{account_id}/videos", {"videos": videos}, runner=False)

@@ -1,7 +1,15 @@
+import { TrashIcon } from '@phosphor-icons/react'
 import { useState } from 'react'
 
-import { useSettings, useUpdateSettings } from '../../api/hooks'
-import type { Settings } from '../../api/types'
+import {
+  useAddFollowedAccount,
+  useFollowedAccounts,
+  useRemoveFollowedAccount,
+  useSetFollowedAccountActive,
+  useSettings,
+  useUpdateSettings,
+} from '../../api/hooks'
+import type { Settings, SocialPlatform } from '../../api/types'
 import { Button } from '../../components/Button'
 import { Checkbox } from '../../components/Checkbox'
 import { ErrorState } from '../../components/ErrorState'
@@ -23,9 +31,108 @@ export function SettingsPage() {
           <PassMarkForm initial={settings.data} />
           <DailyGoals settings={settings.data} />
           <PipelineSwitches settings={settings.data} />
+          <FollowedAccounts />
         </>
       )}
     </div>
+  )
+}
+
+// Who the Following feed (Reels tab) pulls from. kl social discover sweeps these accounts on a
+// schedule; adding one here doesn't fetch anything itself.
+function FollowedAccounts() {
+  const accounts = useFollowedAccounts()
+  const add = useAddFollowedAccount()
+  const setActive = useSetFollowedAccountActive()
+  const remove = useRemoveFollowedAccount()
+  const [platform, setPlatform] = useState<SocialPlatform>('youtube')
+  const [handle, setHandle] = useState('')
+
+  return (
+    <section aria-labelledby="following-heading" className="mt-6 rounded-[20px] border border-rule bg-sheet p-5 sm:p-7">
+      <h2 id="following-heading" className="font-display text-[20px] font-semibold">
+        Followed accounts
+      </h2>
+      <p className="mt-1 text-[15px] leading-relaxed text-muted">
+        The Following tab on Reels shows only reels and shorts from accounts listed here.
+      </p>
+
+      {accounts.isPending ? (
+        <div className="mt-4 h-11 animate-pulse rounded-xl bg-rule/40 motion-reduce:animate-none" />
+      ) : accounts.isError ? (
+        <p className="mt-4 text-[15px] text-pen">Couldn't load accounts. {accounts.error.message}</p>
+      ) : accounts.data.accounts.length === 0 ? (
+        <p className="mt-4 text-[15px] text-muted">No accounts yet.</p>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-1">
+          {accounts.data.accounts.map((account) => (
+            <li key={account.id} className="flex items-center gap-3 py-1">
+              <Checkbox
+                checked={account.active}
+                disabled={setActive.isPending}
+                onChange={(e) => setActive.mutate({ id: account.id, active: e.target.checked })}
+                label={
+                  <span>
+                    <span className="font-bold">@{account.handle}</span>{' '}
+                    <span className="text-[13px] text-muted">{account.platform}</span>
+                  </span>
+                }
+              />
+              <button
+                type="button"
+                onClick={() => remove.mutate(account.id)}
+                disabled={remove.isPending}
+                aria-label={`Stop following @${account.handle}`}
+                className="ml-auto grid size-9 shrink-0 place-items-center rounded-full text-muted transition hover:bg-rule/40 hover:text-pen disabled:pointer-events-none disabled:opacity-50"
+              >
+                <TrashIcon weight="bold" className="size-4" aria-hidden />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form
+        className="mt-5 flex flex-wrap items-end gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          const trimmed = handle.trim().replace(/^@/, '')
+          if (!trimmed) return
+          add.mutate(
+            { platform, handle: trimmed },
+            { onSuccess: () => setHandle('') },
+          )
+        }}
+      >
+        <label className="flex flex-col gap-1">
+          <span className="font-bold">Platform</span>
+          <select
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value as SocialPlatform)}
+            className="h-11 rounded-xl border border-rule bg-sheet px-3 text-[15px]"
+          >
+            <option value="youtube">YouTube</option>
+            <option value="instagram">Instagram</option>
+          </select>
+        </label>
+        <label className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="font-bold">Handle</span>
+          <input
+            type="text"
+            value={handle}
+            onChange={(e) => setHandle(e.target.value)}
+            placeholder="@handle"
+            className="h-11 w-full rounded-xl border border-rule bg-sheet px-3 text-[15px]"
+          />
+        </label>
+        <Button type="submit" variant="secondary" disabled={!handle.trim() || add.isPending}>
+          {add.isPending ? 'Adding…' : 'Add'}
+        </Button>
+      </form>
+      <p aria-live="polite" className="mt-2 text-[14px] empty:hidden">
+        {add.isError && <span className="text-pen">Couldn't add that account. {add.error.message}</span>}
+      </p>
+    </section>
   )
 }
 

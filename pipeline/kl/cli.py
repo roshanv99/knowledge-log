@@ -10,6 +10,7 @@ does the reading, writing and reviewing, and this CLI does everything else.
     kl reel wanted|start|status|render|fail|stop   the manim reel engine (needs the `reels` extra)
     kl reel submit script|script-review|visual FILE
     kl runner poll [--dry-run]              launchd: start a session per kind only if work is wanted
+    kl social discover [--limit N]          sweep followed accounts for new reels/shorts (needs the `social` extra)
     kl docs / kl status                     what's selected in Manage notes / pipeline activity
 """
 
@@ -29,9 +30,11 @@ app = typer.Typer(no_args_is_help=True, help="knowledge-log content pipeline")
 mcq = typer.Typer(no_args_is_help=True, help="The MCQ step engine")
 reel = typer.Typer(no_args_is_help=True, help="The manim reel step engine")
 runner_app = typer.Typer(no_args_is_help=True, help="The launchd runner")
+social_app = typer.Typer(no_args_is_help=True, help="The Following-feed discovery sweep")
 app.add_typer(mcq, name="mcq")
 app.add_typer(reel, name="reel")
 app.add_typer(runner_app, name="runner")
+app.add_typer(social_app, name="social")
 
 
 class Step(str, Enum):
@@ -211,6 +214,15 @@ def runner_poll(
     s = load_settings()
     kinds = kind or list(runner.KINDS)
     _run(lambda: "\n".join(runner.poll(s, _api(s), k, dry_run=dry_run) for k in kinds))
+
+
+@social_app.command("discover")
+def social_discover(
+    limit: Annotated[int, typer.Option(help="Most recent posts to check per account")] = 10,
+) -> None:
+    """Sweep every active followed account for new reels/shorts and report them to the API."""
+    from kl.social import discover
+    _run(lambda: discover.run(_api(), limit))
 
 
 @app.command()

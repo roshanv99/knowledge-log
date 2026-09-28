@@ -4,6 +4,7 @@ import type {
   ActivitySummary,
   Answer,
   AttemptResult,
+  FollowedAccount,
   NoteItems,
   NoteReel,
   NoteScope,
@@ -14,6 +15,8 @@ import type {
   Question,
   ScopeUpdate,
   Settings,
+  SocialPlatform,
+  SocialVideo,
   Today,
   UploadResult,
 } from './types'
@@ -107,6 +110,15 @@ export function createApi(baseUrl: string) {
     recordView: (reelId: number) =>
       request<{ views: number; counted: boolean }>(`/reels/${reelId}/views`, { method: 'POST' }),
     retryTask: (taskId: number) => request<PipelineTask>(`/pipeline/tasks/${taskId}/retry`, { method: 'POST' }),
+    followedAccounts: () => request<{ accounts: FollowedAccount[] }>('/social/accounts'),
+    addFollowedAccount: (platform: SocialPlatform, handle: string) =>
+      request<FollowedAccount>('/social/accounts', { method: 'POST', body: JSON.stringify({ platform, handle }) }),
+    setFollowedAccountActive: (accountId: number, active: boolean) =>
+      request<FollowedAccount>(`/social/accounts/${accountId}`, { method: 'PATCH', body: JSON.stringify({ active }) }),
+    removeFollowedAccount: (accountId: number) => request<null>(`/social/accounts/${accountId}`, { method: 'DELETE' }),
+    socialVideos: () => request<{ videos: SocialVideo[] }>('/social/videos'),
+    recordSocialView: (videoId: number) =>
+      request<{ views: number; counted: boolean }>(`/social/videos/${videoId}/views`, { method: 'POST' }),
   }
 }
 

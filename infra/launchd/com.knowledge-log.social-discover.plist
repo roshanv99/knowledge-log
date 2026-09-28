@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  knowledge-log Following feed: every 6 hours, sweep active followed accounts for new
+  reels/shorts (kl social discover). Plain Python, no Claude session and no runner token —
+  it just scrapes and reports to the API. Kept on a long interval since this is an
+  unofficial scrape against Instagram in particular. Install with infra/launchd/install.sh;
+  @REPO@, @UV@ and @PATH@ are filled in there.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.knowledge-log.social-discover</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@UV@</string>
+    <string>run</string>
+    <string>--quiet</string>
+    <string>--project</string>
+    <string>pipeline</string>
+    <string>kl</string>
+    <string>social</string>
+    <string>discover</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>@REPO@/logs/social-discover.log</string>
+  <key>StandardErrorPath</key>
+  <string>@REPO@/logs/social-discover.log</string>
+</dict>
+</plist>
