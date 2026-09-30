@@ -82,13 +82,6 @@ function KindRow({
       ? `Last run ${ago(last.finished_at, now)}: stopped because ${stopReasonText(last.stop_reason)}. ${made(count(last))} made.`
       : 'No runs yet.'
   }
-  const { made: reelsMade, limit } = status.reels
-  const atLimit = kind === 'reel' && limit > 0 && reelsMade >= limit
-  if (kind === 'reel' && limit > 0) {
-    meta = [meta, atLimit ? `${reelsMade} of ${limit} reels made: the limit in Settings is reached.` : `${reelsMade} of ${limit} reels made.`]
-      .filter(Boolean)
-      .join(' · ')
-  }
 
   return (
     <li className="flex flex-col gap-3 p-5 sm:flex-row sm:items-start sm:justify-between sm:px-7">

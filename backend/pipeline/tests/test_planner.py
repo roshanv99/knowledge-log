@@ -223,6 +223,23 @@ def test_one_active_run_per_kind_and_run_caps(make_doc):
     assert services.claim(run) == "run_cap"
 
 
+def test_question_cap_stops_quiz_work_for_this_run(make_doc):
+    make_doc("A.pdf", 40)
+    run = new_run()
+    prefs = Settings.load()
+    prefs.questions_per_run = 3
+    prefs.save()
+    # Driven directly rather than through the full write/critique loop: only the count matters here.
+    run.questions_made = 3
+    run.save()
+    assert services.claim(run) == "question_cap"
+    services.finish(run, "question_cap", None)
+
+    # A fresh run starts at questions_made=0: the cap is per-run, not carried over from the last one.
+    run2 = new_run()
+    assert isinstance(services.claim(run2), GenerationTask)
+
+
 def test_kill_switch_and_daily_cap(make_doc):
     make_doc("A.pdf", 4)
     prefs = Settings.load()

@@ -49,4 +49,5 @@ class SettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = Settings
         fields = ["pass_pct", "questions_per_set", "pipeline_enabled", "pipeline_auto", "max_tasks_per_run",
-                  "max_runs_per_day", "reel_limit", "daily_questions_goal", "daily_reels_goal"]
+                  "max_runs_per_day", "reels_per_run", "questions_per_run", "daily_questions_goal",
+                  "daily_reels_goal"]

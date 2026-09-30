@@ -73,8 +73,10 @@ class Settings(models.Model):
     pipeline_auto_cloud = models.BooleanField(default=False)
     max_tasks_per_run = models.IntegerField(default=10, validators=[MinValueValidator(1), MaxValueValidator(100)])
     max_runs_per_day = models.IntegerField(default=6, validators=[MinValueValidator(1), MaxValueValidator(48)])
-    # Total reels to make (0 = no limit). Reels are costly, so the pipeline stops once there are this many.
-    reel_limit = models.IntegerField(default=5, validators=[MinValueValidator(0), MaxValueValidator(1000)])
+    # Per-run caps on what a single run produces (0 = no cap for that run). Reels are far costlier
+    # than questions, hence the low default.
+    reels_per_run = models.IntegerField(default=1, validators=[MinValueValidator(0), MaxValueValidator(20)])
+    questions_per_run = models.IntegerField(default=10, validators=[MinValueValidator(0), MaxValueValidator(200)])
     # The current pass through the question pool (see QuizSet.cycle).
     question_cycle = models.IntegerField(default=1)
     # Daily goals for the tracker on the Quiz page.

@@ -17,12 +17,11 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from config.storage import get_storage
-from content.models import Document, GenerationRun, GenerationTask, Reel
+from content.models import Document, GenerationRun, GenerationTask
 from pipeline import serializers as s
 from pipeline import services
 from pipeline.auth import IsRunner, RunnerTokenAuthentication
 from pipeline.models import Runner, RunRequest
-from quiz.models import Settings
 
 
 def runner_endpoint(methods):
@@ -205,16 +204,12 @@ def pipeline_status(request: Request) -> Response:
                           for r in RunRequest.objects.filter(consumed_by_run__isnull=True, expires_at__gt=now)],
         "runners": [{"name": r.name, "kind": r.kind, "last_seen_at": r.last_seen_at}
                     for r in Runner.objects.filter(enabled=True).order_by("name")],
-        "reels": {"made": Reel.objects.count(), "limit": Settings.load().reel_limit},
     })
 
 
 @api_view(["POST"])
 def request_run(request: Request) -> Response:
     data = _valid(s.RequestInput, request)
-    if data["kind"] == "reel" and services.reel_limit_reached(Settings.load()):
-        return Response({"detail": "The reel limit in Settings is reached. Raise it to make more."},
-                        status=status.HTTP_409_CONFLICT)
     run_request = services.request_run(data["kind"])
     return Response({"id": run_request.pk, "kind": run_request.kind, "expires_at": run_request.expires_at},
                     status=status.HTTP_201_CREATED)

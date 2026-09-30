@@ -109,26 +109,27 @@ def test_quiz_and_reel_runs_can_be_active_together(document):
     assert mac.post(f"{API}/runs", {"kind": "reel"}, format="json").status_code == 201
 
 
-def test_reel_limit_stops_reel_work(document, tmp_path):
+def test_reel_cap_stops_reel_work_for_this_run(document, tmp_path):
     from content.models import Chunk
     from quiz.models import Settings
 
     prefs = Settings.load()
-    prefs.reel_limit = 1
+    prefs.reels_per_run = 1
     prefs.save()
     mac = runner_client("kl@mac")
-    run_id, task = reel_task(mac)  # one reel in progress fills the limit of 1
-    assert APIClient().post(f"{API}/requests", {"kind": "reel"},
-                            format="json").status_code == 409
+    run_id, task = reel_task(mac)  # one reel in progress already fills this run's cap of 1
+    # No lifetime cap any more: a request for another reel run still queues.
+    assert APIClient().post(f"{API}/requests", {"kind": "reel"}, format="json").status_code == 201
     upload(mac, task["id"], run_id)
     mac.post(f"{API}/tasks/{task['id']}/complete", {"run_id": run_id, "reel": {
         "title": "T", "storage_key": f"reels/task-{task['id']}.mp4"}}, format="json")
-    assert mac.post(f"{API}/runs/{run_id}/claim", {}, format="json").data == {"task": None, "reason": "reel_limit"}
-    assert mac.get(f"{API}/wanted?kind=reel").status_code == 204
+    assert mac.post(f"{API}/runs/{run_id}/claim", {}, format="json").data == {"task": None, "reason": "reel_cap"}
     assert Chunk.objects.count() == 1  # nothing new was planned
-    prefs.reel_limit = 0  # 0 means no limit
-    prefs.save()
-    assert mac.post(f"{API}/runs/{run_id}/claim", {}, format="json").data["task"] is not None
+    mac.post(f"{API}/runs/{run_id}/finish", {"stop_reason": "reel_cap"}, format="json")
+
+    # A fresh run starts at reels_made=0: the cap is per-run, not carried over from the last one.
+    run2_id, task2 = reel_task(mac)
+    assert task2 is not None
     assert oct((tmp_path / "media" / "reels" / f"task-{task['id']}.mp4").stat().st_mode)[-3:] == "644"
 
 

@@ -63,20 +63,20 @@ def _close(run: GenerationRun, stop_reason: str, usage: dict | None) -> None:
 
 def runs_today(kind: str) -> int:
     start = timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
-    idle = (planner.Reason.NOTHING_SELECTED, planner.Reason.RANGE_DONE, planner.Reason.ALL_FAILED, "disabled",
-            "reel_limit")
+    idle = (planner.Reason.NOTHING_SELECTED, planner.Reason.RANGE_DONE, planner.Reason.ALL_FAILED, "disabled")
     # Runs that found nothing to do don't count against the daily cap.
     return (GenerationRun.objects.filter(kind=kind, started_at__gte=start)
             .exclude(tasks_done=0, stop_reason__in=idle).count())
 
 
-def reel_limit_reached(prefs: Settings) -> bool:
-    """Made reels plus reels being made have reached Settings.reel_limit (0 means no limit)."""
-    if not prefs.reel_limit:
-        return False
-    in_progress = GenerationTask.objects.filter(kind=Kind.REEL, status=Status.CLAIMED,
-                                                lease_expires_at__gte=timezone.now()).count()
-    return Reel.objects.count() + in_progress >= prefs.reel_limit
+def reel_cap_reached(run: GenerationRun, prefs: Settings) -> bool:
+    """This run has already made Settings.reels_per_run reels (0 means no per-run cap)."""
+    return bool(prefs.reels_per_run) and run.reels_made >= prefs.reels_per_run
+
+
+def question_cap_reached(run: GenerationRun, prefs: Settings) -> bool:
+    """This run has already made Settings.questions_per_run questions (0 means no per-run cap)."""
+    return bool(prefs.questions_per_run) and run.questions_made >= prefs.questions_per_run
 
 
 def open_request(kind: str) -> RunRequest | None:
@@ -118,8 +118,10 @@ def claim(run: GenerationRun, document_id: int | None = None) -> GenerationTask 
         return "disabled"
     if run.tasks_done + run.tasks.filter(status=Status.CLAIMED).count() >= prefs.max_tasks_per_run:
         return "run_cap"
-    if run.kind == Kind.REEL and reel_limit_reached(prefs):
-        return "reel_limit"
+    if run.kind == Kind.REEL and reel_cap_reached(run, prefs):
+        return "reel_cap"
+    if run.kind == Kind.QUIZ and question_cap_reached(run, prefs):
+        return "question_cap"
     return planner.claim(run.kind, run, document_id)
 
 
@@ -297,11 +299,6 @@ def wanted(kind: str, runner: Runner) -> dict | None:
     if runs_today(kind) >= prefs.max_runs_per_day:
         return None
     request = open_request(kind)
-    if kind == Kind.REEL and reel_limit_reached(prefs):
-        if request:  # nothing will run: close the request rather than leave it pending
-            request.expires_at = timezone.now()
-            request.save(update_fields=["expires_at"])
-        return None
     auto = prefs.pipeline_auto_cloud if runner.kind == Runner.RunnerKind.CLOUD_ROUTINE else prefs.pipeline_auto
     if request is None and not auto:
         return None

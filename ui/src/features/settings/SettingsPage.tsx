@@ -201,7 +201,7 @@ function PipelineSwitches({ settings }: { settings: Settings }) {
   return (
     <section aria-labelledby="pipeline-heading" className="mt-6 rounded-[20px] border border-rule bg-sheet p-5 sm:p-7">
       <h2 id="pipeline-heading" className="font-display text-[20px] font-semibold">
-        Question pipeline
+        Content pipeline
       </h2>
       <p className="mt-1 text-[15px] leading-relaxed text-muted">
         Claude makes new questions on your Mac, from the pages chosen in Manage notes.
@@ -222,7 +222,7 @@ function PipelineSwitches({ settings }: { settings: Settings }) {
           hint={`Off: only when you press "Make questions now". On: whenever pages are waiting, up to ${settings.max_runs_per_day} runs a day.`}
         />
       </div>
-      <ReelLimit settings={settings} onSave={(reel_limit) => update.mutate({ reel_limit })} saving={update.isPending} />
+      <PerRunCaps settings={settings} />
       <p aria-live="polite" className="mt-2 text-[14px] empty:hidden">
         {update.isError && <span className="text-pen">Couldn't save. {update.error.message}</span>}
       </p>
@@ -230,34 +230,57 @@ function PipelineSwitches({ settings }: { settings: Settings }) {
   )
 }
 
-// Reels cost far more Claude usage than questions, so they have a total cap.
-function ReelLimit({ settings, onSave, saving }: { settings: Settings; onSave: (n: number) => void; saving: boolean }) {
-  const [value, setValue] = useState(String(settings.reel_limit))
-  const parsed = Number(value)
-  const valid = value.trim() !== '' && Number.isInteger(parsed) && parsed >= 0 && parsed <= 1000
+// How much one run makes before it stops on its own. Reels cost far more Claude usage than
+// questions, hence the low default.
+function PerRunCaps({ settings }: { settings: Settings }) {
+  const update = useUpdateSettings()
+  const [questions, setQuestions] = useState(String(settings.questions_per_run))
+  const [reels, setReels] = useState(String(settings.reels_per_run))
+  const q = Number(questions)
+  const r = Number(reels)
+  const validQ = questions.trim() !== '' && Number.isInteger(q) && q >= 0 && q <= 200
+  const validR = reels.trim() !== '' && Number.isInteger(r) && r >= 0 && r <= 20
+  const dirty = q !== settings.questions_per_run || r !== settings.reels_per_run
+  const field =
+    'h-11 w-24 rounded-xl border border-rule bg-sheet px-2 text-center font-display text-[17px] font-semibold tabular-nums'
+
   return (
     <form
-      className="mt-4 flex flex-wrap items-end gap-3"
+      className="mt-4 flex flex-wrap items-end gap-6"
       onSubmit={(e) => {
         e.preventDefault()
-        if (valid && parsed !== settings.reel_limit) onSave(parsed)
+        if (validQ && validR && dirty) update.mutate({ questions_per_run: q, reels_per_run: r })
       }}
     >
       <label className="flex flex-col gap-1">
-        <span className="font-bold">Reels to make</span>
-        <span className="text-[13px] text-muted">In total. 0 means no limit.</span>
+        <span className="font-bold">Questions per run</span>
+        <span className="text-[13px] text-muted">0 means no limit for a single run.</span>
         <input
           type="number"
           inputMode="numeric"
           min={0}
-          max={1000}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          aria-invalid={!valid}
-          className="h-11 w-24 rounded-xl border border-rule bg-sheet px-2 text-center font-display text-[17px] font-semibold tabular-nums"
+          max={200}
+          value={questions}
+          onChange={(e) => setQuestions(e.target.value)}
+          aria-invalid={!validQ}
+          className={field}
         />
       </label>
-      <Button type="submit" variant="secondary" disabled={!valid || saving || parsed === settings.reel_limit}>
+      <label className="flex flex-col gap-1">
+        <span className="font-bold">Reels per run</span>
+        <span className="text-[13px] text-muted">0 means no limit. Reels cost far more Claude usage.</span>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={20}
+          value={reels}
+          onChange={(e) => setReels(e.target.value)}
+          aria-invalid={!validR}
+          className={field}
+        />
+      </label>
+      <Button type="submit" variant="secondary" disabled={!validQ || !validR || !dirty || update.isPending}>
         Save
       </Button>
     </form>

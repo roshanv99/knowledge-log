@@ -35,9 +35,12 @@ Related: [`PLAN.md`](PLAN.md), [`MANIM_PIPELINE.md`](MANIM_PIPELINE.md).
 - **One active run per kind** (a partial unique index); **quiz and reel runs go in parallel**, each
   in its own Claude Code session. An unread chunk another kind is reading right now is not offered,
   so two sessions never read the same pages; once read, both kinds share the notes.
-- **Reels are capped in total** (`reel_limit`, default 5, 0 = no limit): made reels plus reels in
-  progress. At the limit, reel claims return `reel_limit`, `wanted` starts nothing, and "Make a reel
-  now" is refused. Every reel is a manim explainer (`reel_style="manim"`) until a router exists.
+- **Reels and questions are capped per run** (`reels_per_run` default 1, `questions_per_run` default
+  10; 0 = no cap for that run), not in total — a run's own `reels_made`/`questions_made` counter
+  against the setting. At the cap, claims return `reel_cap`/`question_cap`; a fresh run starts at
+  0 regardless of what earlier runs made, so nothing needs pre-checking before a run starts (unlike
+  the old total cap, `wanted` and "Make a reel now" no longer refuse anything on this basis). Every
+  reel is a manim explainer (`reel_style="manim"`) until a router exists.
 - **Local review files stay** under `output/`; they are not the source of truth.
 
 ## Data model
@@ -52,7 +55,7 @@ Django migrations own it (`content` 0003–0004, `pipeline` 0001, `quiz` 0002).
 | `note_scopes` | Added `priority`: position in Manage notes, top first. New PDFs go on top (lowest priority); migration 0007 reset it from the added date, newest first. |
 | `runners` (new) | `name`, `kind`, `token_hash` (SHA-256), `enabled`, `last_seen_at`. |
 | `run_requests` (new) | A request for a run: `kind`, `created_at`, `expires_at` (+6 h), `consumed_by_run`. At most one open per kind. The app's buttons for it were removed on 2026-09-24; `POST /api/pipeline/requests` remains for scripts. |
-| `settings` | Added `pipeline_enabled` (kill switch), `pipeline_auto` (off: runs only on request), `max_tasks_per_run` (10), `max_runs_per_day` (6), `reel_limit` (5). |
+| `settings` | Added `pipeline_enabled` (kill switch), `pipeline_auto` (off: runs only on request), `max_tasks_per_run` (10), `max_runs_per_day` (6), `reels_per_run` (1), `questions_per_run` (10). |
 | `generation_runs` (reels) | `reels_made` alongside `questions_made`. |
 
 The data migration turned every `done` chunk into a `read` chunk plus a `done` quiz task linked
@@ -87,7 +90,7 @@ anything else):
 |---|---|---|
 | `GET /wanted?kind=quiz` | — | `200 {kind, reason: run_request\|schedule, request_id, document, pages}` or `204` |
 | `POST /runs` | `{kind, params}` | `201 {run_id}`; `403` kill switch or daily cap; `409` a run of this kind is active |
-| `POST /runs/{id}/claim` | `{document_id?}` | `200 {task, reason}`: `task` is the payload below, or null with `reason` (`range_done`, `nothing_selected`, `all_failed`, `run_cap`, `disabled`, `reel_limit`) |
+| `POST /runs/{id}/claim` | `{document_id?}` | `200 {task, reason}`: `task` is the payload below, or null with `reason` (`range_done`, `nothing_selected`, `all_failed`, `run_cap`, `disabled`, `reel_cap`, `question_cap`) |
 | `POST /tasks/{id}/heartbeat` | `{run_id, stage, detail}` | Extends the lease. `409` if the claim is lost |
 | `PUT /tasks/{id}/notes` | `{run_id, title, summary, key_points, testable}` | Chunk becomes `read` or `unreadable` |
 | `PUT /tasks/{id}/media?run_id=&kind=video\|poster` | raw MP4 or PNG body | `201 {storage_key}`. Reel tasks only; checked by magic bytes; ≤ 200 MB (`KL_MAX_MEDIA_BYTES`); streamed to disk |
@@ -185,7 +188,7 @@ instructions. Logs: `logs/runner-poll.log`, `logs/runner-<kind>-<time>.log`.
   `progress: {pages_in_range, pages_done, done_ranges, failed[], active}`.
 - **Pipeline panel** (`PipelinePanel.tsx`): a row per kind, e.g. "Making a reel: Docker and Kube:
   Animating pages 1–4, scene fix 1 of 3", or "Reel requested", or "Last run 8 min ago: stopped
-  because …", plus "1 of 5 reels made" for reels and when the Mac's runner last checked in (red if it's quiet for 15 min
+  because …", plus how many parts done and made so far this run, and when the Mac's runner last checked in (red if it's quiet for 15 min
   while work waits).
 - **Reels tab** (`ReelsPage.tsx`): in-scope reels, newest first, one per screen, like Instagram and
   TikTok: swipe (phones, native snapping) or scroll (one wheel/trackpad gesture = one reel, the
@@ -217,7 +220,8 @@ instructions. Logs: `logs/runner-poll.log`, `logs/runner-<kind>-<time>.log`.
   strips under the page track (stripes for questions, dots for reels; only once something is made),
   a "got stuck" list with the error and **Retry**, and a drag handle (pointer drag, or the arrow keys
   on the focused handle, announced to screen readers).
-- **Settings:** "Pipeline on" (kill switch), "Start runs by itself" (`pipeline_auto`), and "Reels to make" (`reel_limit`).
+- **Settings:** "Pipeline on" (kill switch), "Start runs by itself" (`pipeline_auto`), and, in
+  "Content pipeline," "Questions per run" (`questions_per_run`) and "Reels per run" (`reels_per_run`).
 - Polling every 5 s only while a run is active or requested, with one refresh when it ends.
 
 ## Verification (2026-09-24)

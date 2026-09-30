@@ -64,8 +64,10 @@ export interface Settings {
   pipeline_auto: boolean
   max_tasks_per_run: number
   max_runs_per_day: number
-  /** Total reels to make; 0 means no limit. */
-  reel_limit: number
+  /** Reels to make in one run; 0 means no per-run cap. */
+  reels_per_run: number
+  /** Questions to make in one run; 0 means no per-run cap. */
+  questions_per_run: number
   /** Daily goals for the tracker on the Quiz page. */
   daily_questions_goal: number
   daily_reels_goal: number
@@ -194,7 +196,6 @@ export interface PipelineStatus {
   failed_tasks: PipelineTask[]
   open_requests: { id: number; kind: ContentKind; created_at: string }[]
   runners: { name: string; kind: string; last_seen_at: string | null }[]
-  reels: { made: number; limit: number }
 }
 
 // My Notes reels (backend content/views.py `reels`).
