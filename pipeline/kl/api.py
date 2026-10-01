@@ -6,10 +6,26 @@ runner token from KL_RUNNER_TOKEN (issued by `manage.py runner_token <name>`).
 
 import json
 import shutil
+import ssl
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Protocol
+
+# Python 3.13 turned on OpenSSL's strict X.509 checks by default (ssl.VERIFY_X509_STRICT),
+# which rejects a certificate missing a keyUsage extension. That's never true of a real CA, but
+# a cloud routine's sandbox terminates outbound TLS through its own interception proxy, and that
+# proxy's reissued CA certificate lacks the extension — curl and Python <=3.12 verify the exact
+# same chain without issue. Clearing just this one flag restores the pre-3.13 behavior; it does
+# not touch certificate trust, expiry or hostname verification (verify_mode stays CERT_REQUIRED,
+# check_hostname stays on) — getattr() because the flag doesn't exist before 3.13.
+def _ssl_context() -> ssl.SSLContext:
+    context = ssl.create_default_context()
+    context.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
+    return context
+
+
+_SSL_CONTEXT = _ssl_context()
 
 
 class ApiError(Exception):
@@ -76,7 +92,7 @@ class HttpApi:
             raw, content_type = json.dumps(body).encode(), "application/json"
         request = self._request(method, path, raw, content_type, runner)
         try:
-            with urllib.request.urlopen(request, timeout=timeout or self.timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout or self.timeout, context=_SSL_CONTEXT) as response:
                 raw = response.read()
                 return json.loads(raw) if raw else None
         except urllib.error.URLError as e:
@@ -97,7 +113,7 @@ class HttpApi:
         part = dest.with_name(dest.name + ".part")
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response, part.open("wb") as f:
+            with urllib.request.urlopen(request, timeout=self.timeout, context=_SSL_CONTEXT) as response, part.open("wb") as f:
                 shutil.copyfileobj(response, f, 1 << 20)
         except urllib.error.URLError as e:
             part.unlink(missing_ok=True)
