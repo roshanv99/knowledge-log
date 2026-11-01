@@ -25,6 +25,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # arm64 is what the home server (MacBook Air M2) runs; amd64 keeps the Hostinger VPS
+      # deployable until it's retired.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -39,6 +44,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
@@ -47,9 +53,21 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    env:
+      # Set once the app lives on the home server, which is reachable only over Tailscale.
+      # Unset (Hostinger, public IP), the tailnet step is skipped.
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Join the tailnet
+        if: env.TS_OAUTH_CLIENT_ID != ''
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
 
       - name: Validate deploy secrets
         env:
@@ -155,6 +173,8 @@ jobs:
       # Refresh the shared edge proxy (roshanv99/api-gateway-2) over the same SSH session
       # that just deployed this app — see ~/Projects/api-gateway's log-book precedent for why
       # this goes over SSH rather than a cross-repo repository_dispatch (no extra PAT to issue).
+      # Only Hostinger has that proxy; on the home server cloudflared routes by alias and needs
+      # no refresh. Drop this step once Hostinger is retired.
       - name: Refresh the shared gateway
         env:
           SSH_HOST: ${{ secrets.SSH_HOST }}
@@ -162,4 +182,4 @@ jobs:
         run: |
           ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             "${SSH_USER}@${SSH_HOST}" \
-            "export DEPLOY_PATH=/opt/hostinger-api-gateway && bash /opt/hostinger-api-gateway/deploy/ci-deploy.sh"
+            "if [ -d /opt/hostinger-api-gateway ]; then export DEPLOY_PATH=/opt/hostinger-api-gateway && bash /opt/hostinger-api-gateway/deploy/ci-deploy.sh; else echo 'no gateway on this host (home server: cloudflared routes by alias)'; fi"
