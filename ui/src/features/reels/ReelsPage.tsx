@@ -1,6 +1,6 @@
 import { InfoIcon, PlayIcon } from '@phosphor-icons/react'
 import { useReducedMotion } from 'motion/react'
-import { type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 
 import { useReels, useSocialVideos } from '../../api/hooks'
@@ -13,6 +13,11 @@ import { SwipeDeck } from './SwipeDeck'
 import { WatchCounter } from './WatchCounter'
 
 const INFO_KEY = 'kl.reels.info'
+// Around the reel in view, only these stay mounted as real <video>s: the next few load ahead so a
+// swipe starts at once, and the last few keep what they buffered for a swipe back. The rest are
+// empty screens, so a feed of thousands holds a handful of videos, not thousands.
+const PRELOAD_AHEAD = 2
+const KEEP_BEHIND = 3
 
 type Tab = 'notes' | 'following'
 
@@ -63,8 +68,19 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 function NotesTab() {
   const reels = useReels()
+  const items = useMemo(() => reels.data?.pages.flatMap((page) => page.reels) ?? [], [reels.data])
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = reels
 
-  if (reels.data && reels.data.reels.length > 0) return <Feed reels={reels.data.reels} />
+  if (items.length > 0)
+    return (
+      <Feed
+        reels={items}
+        complete={!hasNextPage}
+        onNearEnd={() => {
+          if (hasNextPage && !isFetchingNextPage) void fetchNextPage()
+        }}
+      />
+    )
 
   return (
     <div className="mx-auto max-w-[520px] px-5 pt-24 pb-10 sm:px-8 lg:pt-24">
@@ -133,63 +149,6 @@ function details(reel: NoteReel): string {
   }`
 }
 
-/**
- * Plays the reel in view and pauses the rest. Once the learner has started one reel, scrolling to
- * the next plays it (not with reduced motion). `root` is the scrolling element.
- */
-function useFeedPlayback(reels: NoteReel[], root: RefObject<HTMLElement | null>) {
-  const videos = useRef(new Map<number, HTMLVideoElement>())
-  const watching = useRef(false)
-  const reduce = useReducedMotion()
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const video = entry.target as HTMLVideoElement
-          if (!entry.isIntersecting) video.pause()
-          else if (watching.current && !reduce) void video.play().catch(() => {})
-        }
-      },
-      { root: root.current, threshold: 0.7 },
-    )
-    videos.current.forEach((v) => observer.observe(v))
-    return () => observer.disconnect()
-  }, [reels, reduce, root])
-
-  return {
-    register: (id: number) => (el: HTMLVideoElement | null) => {
-      if (el) videos.current.set(id, el)
-      else videos.current.delete(id)
-    },
-    onPlay: (id: number) => {
-      watching.current = true
-      videos.current.forEach((v, other) => other !== id && v.pause())
-    },
-  }
-}
-
-/**
- * The reel's <video> element as state (for the watch counter) plus a stable ref callback that also
- * registers it with the feed. Stable matters: an inline ref callback re-runs on every render, and
- * setting state from it would render again, forever.
- */
-function useVideoElement(id: number, register: (id: number) => (el: HTMLVideoElement | null) => void) {
-  const [element, setElement] = useState<HTMLVideoElement | null>(null)
-  const registerRef = useRef(register)
-  useEffect(() => {
-    registerRef.current = register
-  })
-  const ref = useCallback(
-    (el: HTMLVideoElement | null) => {
-      setElement(el)
-      registerRef.current(id)(el)
-    },
-    [id],
-  )
-  return [element, ref] as const
-}
-
 function readInfoPreference(): boolean {
   try {
     return window.localStorage.getItem(INFO_KEY) !== 'hidden'
@@ -198,11 +157,17 @@ function readInfoPreference(): boolean {
   }
 }
 
-// The My Notes feed: the SwipeDeck shell plus video-specific playback (IntersectionObserver
-// play/pause) and the ⓘ details toggle, remembered on this device.
-function Feed({ reels }: { reels: NoteReel[] }) {
+function reelLabel(index: number, count: number, complete: boolean): string {
+  return complete ? `reel ${index + 1} of ${count}` : `reel ${index + 1}`
+}
+
+// The My Notes feed: the SwipeDeck shell plus video-specific playback (the reel in view plays once
+// the learner has started one, the rest pause), the load-ahead window and the ⓘ details toggle,
+// remembered on this device. `reels` is every page loaded so far; a reel can appear twice once the
+// feed comes round to it again, so screens are keyed by position.
+function Feed({ reels, complete, onNearEnd }: { reels: NoteReel[]; complete: boolean; onNearEnd: () => void }) {
   const scroller = useRef<HTMLOListElement>(null)
-  const { register, onPlay } = useFeedPlayback(reels, scroller)
+  const watching = useRef(false)
   const [info, setInfo] = useState(readInfoPreference)
 
   function toggleInfo() {
@@ -218,46 +183,68 @@ function Feed({ reels }: { reels: NoteReel[] }) {
   return (
     <SwipeDeck
       items={reels}
-      keyOf={(reel) => reel.id}
+      keyOf={(reel, i) => `${i}-${reel.id}`}
       ariaLabel="Reels from your notes"
       scrollerRef={scroller}
-      announce={(reel, index, count) => `Reel ${index + 1} of ${count}: ${reel.title}`}
-      renderItem={(reel, { index, count }) => (
-        <Reel
-          reel={reel}
-          index={index}
-          count={count}
-          info={info}
-          onToggleInfo={toggleInfo}
-          videoRef={register}
-          onPlay={() => onPlay(reel.id)}
-        />
-      )}
+      onCurrentChange={(i) => i >= reels.length - 1 - PRELOAD_AHEAD && onNearEnd()}
+      announce={(reel, index, count) => `${capitalize(reelLabel(index, count, complete))}: ${reel.title}`}
+      renderItem={(reel, { index, count, current, active }) => {
+        const distance = index - current
+        if (distance > PRELOAD_AHEAD || distance < -KEEP_BEHIND)
+          return <div aria-hidden className="h-full w-full bg-black sm:aspect-[9/16] sm:w-auto sm:rounded-2xl" />
+        return (
+          <Reel
+            reel={reel}
+            label={reelLabel(index, count, complete)}
+            active={active}
+            preload={distance >= 0 ? 'auto' : 'metadata'}
+            autoplay={() => watching.current}
+            onStart={() => (watching.current = true)}
+            info={info}
+            onToggleInfo={toggleInfo}
+          />
+        )
+      }}
     />
   )
 }
 
 function Reel({
   reel,
-  index,
-  count,
+  label,
+  active,
+  preload,
+  autoplay,
+  onStart,
   info,
   onToggleInfo,
-  videoRef,
-  onPlay,
 }: {
   reel: NoteReel
-  index: number
-  count: number
+  label: string
+  active: boolean
+  preload: 'auto' | 'metadata'
+  /** True once the learner has started any reel: from then on, the reel scrolled into view plays. */
+  autoplay: () => boolean
+  onStart: () => void
   info: boolean
   onToggleInfo: () => void
-  videoRef: (id: number) => (el: HTMLVideoElement | null) => void
-  onPlay: () => void
 }) {
-  const [video, ref] = useVideoElement(reel.id, videoRef)
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
-  const infoId = `reel-info-${reel.id}`
+  const reduce = useReducedMotion()
+  const infoId = useId()
+  // A ref, so a new callback each render doesn't re-run the play/pause effect.
+  const autoplayRef = useRef(autoplay)
+  useEffect(() => {
+    autoplayRef.current = autoplay
+  })
+
+  useEffect(() => {
+    if (!video) return
+    if (!active) video.pause()
+    else if (!reduce && autoplayRef.current()) void video.play().catch(() => {})
+  }, [active, video, reduce])
 
   function togglePlay() {
     if (!video) return
@@ -269,14 +256,14 @@ function Reel({
     // The reel's frame: the full screen on a phone, a centred 9:16 card on wider screens.
     <div className="relative h-full w-full sm:aspect-[9/16] sm:w-auto sm:max-w-full sm:overflow-hidden sm:rounded-2xl">
       <video
-        ref={ref}
+        ref={setVideo}
         src={reel.url}
         poster={reel.poster ?? undefined}
         playsInline
-        preload={index < 2 ? 'metadata' : 'none'}
+        preload={preload}
         onPlay={() => {
           setPlaying(true)
-          onPlay()
+          onStart()
         }}
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
@@ -294,7 +281,7 @@ function Reel({
       <button
         type="button"
         onClick={togglePlay}
-        aria-label={`${playing ? 'Pause' : 'Play'} ${reel.title}, reel ${index + 1} of ${count}`}
+        aria-label={`${playing ? 'Pause' : 'Play'} ${reel.title}, ${label}`}
         className="absolute inset-0 grid place-items-center focus-visible:outline-offset-[-4px]"
       >
         {!playing && (

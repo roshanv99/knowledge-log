@@ -200,6 +200,13 @@ export interface PipelineStatus {
 
 // My Notes reels (backend content/views.py `reels`).
 
+/** One page of the feed in watch order: unwatched first, then least recently watched. */
+export interface ReelPage {
+  reels: NoteReel[]
+  /** Cursor for the next page, or null at the end of the feed. */
+  next: string | null
+}
+
 export interface NoteReel {
   id: number
   title: string

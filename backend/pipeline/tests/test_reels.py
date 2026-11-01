@@ -156,3 +156,67 @@ def test_watches_are_counted_once_per_play_through(document):
     assert APIClient().post(f"/api/reels/{reel_id}/views").data == {"views": 2, "counted": True}
     assert APIClient().get("/api/reels").data["reels"][0]["views"] == 2
     assert APIClient().post("/api/reels/999/views").status_code == 404
+
+
+def feed_reels(document, count: int) -> list[Reel]:
+    """`count` reels, created a minute apart, so the last one is the newest."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from content.models import Chunk
+
+    chunk = Chunk.objects.create(document=document, page_start=1, page_end=8, status="read")
+    start = timezone.now() - timedelta(hours=1)
+    return [Reel.objects.create(chunk=chunk, kind="manim", title=f"R{i}", storage_key=f"reels/r{i}.mp4",
+                                source_pages=[1], created_at=start + timedelta(minutes=i)) for i in range(count)]
+
+
+def walk_feed(limit: int) -> list[str]:
+    titles, after = [], ""
+    while True:
+        page = APIClient().get("/api/reels", {"limit": limit, "after": after}).data
+        titles += [r["title"] for r in page["reels"]]
+        if not (after := page["next"]):
+            return titles
+
+
+def test_feed_pages_unwatched_first_then_least_recently_watched(document):
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from content.models import ReelView
+
+    r0, r1, r2, r3, r4 = feed_reels(document, 5)
+    now = timezone.now()
+    ReelView.objects.create(reel=r1, created_at=now - timedelta(minutes=5))
+    ReelView.objects.create(reel=r3, created_at=now - timedelta(minutes=10))
+    ReelView.objects.create(reel=r4, created_at=now - timedelta(minutes=20))
+    ReelView.objects.create(reel=r4, created_at=now - timedelta(minutes=1))
+
+    # Unwatched newest first, then one watch (longest ago first), then two watches.
+    assert walk_feed(limit=2) == ["R2", "R0", "R3", "R1", "R4"]
+    first = APIClient().get("/api/reels", {"limit": 2}).data
+    assert len(first["reels"]) == 2 and first["next"]
+    assert APIClient().get("/api/reels", {"limit": 5}).data["next"] is None
+
+
+def test_a_reel_watched_mid_feed_comes_round_again_at_the_end(document):
+    feed_reels(document, 3)
+    first = APIClient().get("/api/reels", {"limit": 1}).data
+    assert [r["title"] for r in first["reels"]] == ["R2"]
+    APIClient().post(f"/api/reels/{first['reels'][0]['id']}/views")
+
+    rest, after = [], first["next"]
+    while after:
+        page = APIClient().get("/api/reels", {"limit": 1, "after": after}).data
+        rest += [r["title"] for r in page["reels"]]
+        after = page["next"]
+    # The two skipped reels aren't repeated; the watched one is back for its next round.
+    assert rest == ["R1", "R0", "R2"]
+
+
+def test_feed_rejects_a_bad_cursor(document):
+    assert APIClient().get("/api/reels", {"after": "nope"}).status_code == 400
+    assert APIClient().get("/api/reels", {"limit": "x"}).status_code == 400

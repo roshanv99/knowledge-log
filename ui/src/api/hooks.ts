@@ -1,14 +1,21 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  type InfiniteData,
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 
 import { api } from './client'
 import type {
   Answer,
   Note,
-  NoteReel,
   NoteScope,
   NotesList,
   NotesQuery,
   PipelineStatus,
+  ReelPage,
   Settings,
   SocialPlatform,
   SocialVideo,
@@ -112,8 +119,20 @@ export function useRemoveNoteFile() {
   })
 }
 
+/**
+ * The My Notes feed, a page at a time (call fetchNextPage as the learner nears the end). The order
+ * is the server's watch order at the time each page was fetched, so the feed isn't refetched under
+ * the learner: it's dropped when they leave the tab and starts fresh, from unwatched reels, next visit.
+ */
 export function useReels() {
-  return useQuery({ queryKey: keys.reels, queryFn: api.reels })
+  return useInfiniteQuery({
+    queryKey: keys.reels,
+    queryFn: ({ pageParam }) => api.reels(pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next,
+    staleTime: Infinity,
+    gcTime: 0,
+  })
 }
 
 /** Count one watch of a reel; the cached feed takes the server's count. */
@@ -122,8 +141,16 @@ export function useRecordView() {
   return useMutation({
     mutationFn: (reelId: number) => api.recordView(reelId),
     onSuccess: ({ views }, reelId) => {
-      client.setQueryData<{ reels: NoteReel[] }>(keys.reels, (data) =>
-        data && { reels: data.reels.map((r) => (r.id === reelId ? { ...r, views } : r)) },
+      client.setQueryData<InfiniteData<ReelPage, string | null>>(
+        keys.reels,
+        (data) =>
+          data && {
+            ...data,
+            pages: data.pages.map((page) => ({
+              ...page,
+              reels: page.reels.map((r) => (r.id === reelId ? { ...r, views } : r)),
+            })),
+          },
       )
       client.invalidateQueries({ queryKey: keys.activity })
     },

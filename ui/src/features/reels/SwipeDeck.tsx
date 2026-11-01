@@ -21,11 +21,11 @@ export function SwipeDeck<T>({
   announce,
 }: {
   items: T[]
-  keyOf: (item: T) => number | string
+  keyOf: (item: T, index: number) => number | string
   ariaLabel: string
   scrollerRef: RefObject<HTMLOListElement | null>
   onCurrentChange?: (index: number) => void
-  renderItem: (item: T, ctx: { index: number; count: number; active: boolean }) => ReactNode
+  renderItem: (item: T, ctx: { index: number; count: number; current: number; active: boolean }) => ReactNode
   announce?: (item: T, index: number, count: number) => string
 }) {
   const reduce = useReducedMotion()
@@ -113,8 +113,8 @@ export function SwipeDeck<T>({
         className="h-full snap-y snap-mandatory overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {items.map((item, i) => (
-          <li key={keyOf(item)} className="flex h-full snap-start snap-always items-center justify-center sm:py-4">
-            {renderItem(item, { index: i, count: items.length, active: i === current })}
+          <li key={keyOf(item, i)} className="flex h-full snap-start snap-always items-center justify-center sm:py-4">
+            {renderItem(item, { index: i, count: items.length, current, active: i === current })}
           </li>
         ))}
       </ol>

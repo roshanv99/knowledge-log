@@ -6,7 +6,7 @@ from pathlib import Path
 from django.conf import settings
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, StreamingHttpResponse
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Max
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -208,16 +208,56 @@ def note_items(request: Request, document_id: int) -> Response:
 
 @api_view(["GET"])
 def reels(request: Request) -> Response:
-    """The My Notes reel feed: reels whose pages are in the learner's current scope, newest first."""
-    items = reels_in_scope(Reel.objects.select_related("chunk__document").annotate(view_count=Count("views"))
-                           .order_by("-created_at", "-id"))
+    """One page of the My Notes reel feed (in-scope reels only), in watch order: see `_watch_order`.
+
+    `after` is the previous page's `next` cursor. It marks a position in that order, not a reel, so
+    a reel watched since then has moved past it and comes round again once everything ahead of it
+    has been shown.
+    """
+    try:
+        limit = min(max(int(request.query_params.get("limit", REEL_PAGE)), 1), REEL_PAGE_MAX)
+        after = _parse_cursor(request.query_params.get("after"))
+    except ValueError:
+        return Response({"detail": "Bad limit or cursor."}, status=status.HTTP_400_BAD_REQUEST)
+    # Scope is checked in Python (page ranges), so order and slice in Python too. The rows are
+    # small; the expensive part is resolving each reel's media, which only this page pays for.
+    items = sorted(reels_in_scope(Reel.objects.select_related("chunk__document")
+                                  .annotate(view_count=Count("views"), last_viewed=Max("views__created_at"))),
+                   key=_watch_order)
+    if after is not None:
+        items = [r for r in items if _watch_order(r) > after]
+    page = items[:limit]
     storage = get_storage()
     return Response({"reels": [{
         "id": r.pk, "title": r.title, "key_point": r.key_point, "kind": r.kind, "duration_s": r.duration_s,
         "document": r.chunk.document.filename, "topic": r.chunk.title, "source_pages": r.source_pages,
         "url": storage.resolve_url(r.storage_key), "poster": _poster(r, storage), "created_at": r.created_at,
         "views": r.view_count,
-    } for r in items]})
+    } for r in page], "next": _cursor(page[-1]) if len(items) > limit else None})
+
+
+REEL_PAGE = 5
+REEL_PAGE_MAX = 20
+
+
+def _watch_order(reel: Reel) -> tuple[int, int, int, int]:
+    """Unwatched reels first, newest first; then the fewest watches, least recently watched first.
+    Finishing a reel sends it to the back of the next round, so the feed cycles through everything."""
+    last = int(reel.last_viewed.timestamp() * 1_000_000) if reel.last_viewed else -1
+    return reel.view_count, last, -int(reel.created_at.timestamp() * 1_000_000), -reel.pk
+
+
+def _cursor(reel: Reel) -> str:
+    return ".".join(str(part) for part in _watch_order(reel))
+
+
+def _parse_cursor(value: str | None) -> tuple[int, int, int, int] | None:
+    if not value:
+        return None
+    parts = tuple(int(part) for part in value.split("."))
+    if len(parts) != 4:
+        raise ValueError(value)
+    return parts
 
 
 # Two counts closer together than this are one watch sent twice (a retried request, a double event).
