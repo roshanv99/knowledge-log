@@ -75,10 +75,9 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-          RCLONE_CONFIG_B64: ${{ secrets.RCLONE_CONFIG_B64 }}
         run: |
           missing=()
-          for name in SSH_PRIVATE_KEY SSH_HOST SSH_USER DEPLOY_PATH RCLONE_CONFIG_B64; do
+          for name in SSH_PRIVATE_KEY SSH_HOST SSH_USER DEPLOY_PATH; do
             eval "value=\${$name}"
             if [ -z "$value" ]; then
               missing+=("$name")
@@ -120,45 +119,6 @@ jobs:
           scp -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             deploy/backup.sh deploy/ci-deploy.sh \
             "${SSH_USER}@${SSH_HOST}:/tmp/knowledge-log-ci-deploy/"
-
-      - name: Install rclone config on server
-        env:
-          RCLONE_CONFIG_B64: ${{ secrets.RCLONE_CONFIG_B64 }}
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-        run: |
-          set -euo pipefail
-          cleaned="$(printf '%s' "$RCLONE_CONFIG_B64" | tr -d '\n\r\t ')"
-
-          if printf '%s' "$cleaned" | grep -q '^\[gdrive\]'; then
-            echo "RCLONE_CONFIG_B64 looks like raw rclone.conf text, not base64."
-            echo "Re-create the secret (macOS):"
-            echo "  base64 -i ~/.config/rclone/rclone.conf | tr -d '\n' | gh secret set RCLONE_CONFIG_B64"
-            exit 1
-          fi
-
-          if ! printf '%s' "$cleaned" | grep -Eq '^[A-Za-z0-9+/=]+$'; then
-            echo "RCLONE_CONFIG_B64 contains invalid characters (must be base64 only)."
-            exit 1
-          fi
-
-          if ! printf '%s' "$cleaned" | base64 -d > /tmp/rclone.conf; then
-            echo "Failed to base64-decode RCLONE_CONFIG_B64."
-            exit 1
-          fi
-
-          if ! grep -q '^\[gdrive\]' /tmp/rclone.conf; then
-            echo "Decoded rclone.conf is missing a [gdrive] section."
-            exit 1
-          fi
-
-          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            "${SSH_USER}@${SSH_HOST}" "mkdir -p ~/.config/rclone && chmod 700 ~/.config/rclone"
-          scp -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            /tmp/rclone.conf "${SSH_USER}@${SSH_HOST}:~/.config/rclone/rclone.conf"
-          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            "${SSH_USER}@${SSH_HOST}" "chmod 600 ~/.config/rclone/rclone.conf"
-          rm -f /tmp/rclone.conf
 
       - name: Backup database and deploy
         env:

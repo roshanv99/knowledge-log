@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the daily midnight (IST) backup to Google Drive in the current user's own crontab.
+# Install the daily midnight (IST) database backup to R2 in the current user's own crontab.
 # Run on the Hostinger host (once, or automatically after each deploy) — no root needed. The
 # `deploy` user this runs as in CI has no sudo (by design, see api-gateway-2/CLAUDE.md), so
 # this uses `crontab`, not /etc/cron.d (which only root can write).

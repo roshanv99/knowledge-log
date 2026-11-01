@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
-# Dump Postgres from the compose stack and upload to Google Drive via rclone.
-# Run on the Hostinger host from the repo root (see deploy/HOSTINGER.md).
+# Dump Postgres from the compose stack and upload it to a private Cloudflare R2 bucket via
+# rclone. Run on the server from the repo root: nightly from cron (install-backup-cron.sh)
+# and before every deploy (ci-deploy.sh).
+#
+# Why R2 and not Google Drive (what this used to upload to): Drive needs an OAuth login, and
+# a Google app left in "Testing" expires its refresh token after 7 days. That silently broke
+# every backup — and so every deploy — from 2026-10-02 to 2026-11-01. R2 uses a plain S3 key
+# that doesn't expire. The rclone remote is defined entirely from .env below, so there is no
+# rclone.conf on the server to keep in sync.
+#
+# Needs in .env: R2_ENDPOINT_URL (shared with the media bucket — same account) and a token
+# scoped to the backups bucket only:
+#   BACKUP_R2_BUCKET, BACKUP_R2_ACCESS_KEY_ID, BACKUP_R2_SECRET_ACCESS_KEY
 
 set -euo pipefail
 
@@ -21,40 +32,41 @@ set +a
 
 : "${POSTGRES_USER:?POSTGRES_USER not set in .env}"
 : "${POSTGRES_DB:?POSTGRES_DB not set in .env}"
+: "${R2_ENDPOINT_URL:?R2_ENDPOINT_URL not set in .env}"
+: "${BACKUP_R2_BUCKET:?BACKUP_R2_BUCKET not set in .env}"
+: "${BACKUP_R2_ACCESS_KEY_ID:?BACKUP_R2_ACCESS_KEY_ID not set in .env}"
+: "${BACKUP_R2_SECRET_ACCESS_KEY:?BACKUP_R2_SECRET_ACCESS_KEY not set in .env}"
 
-# Google Drive folder (root of My Drive): gdrive:knowledge-log-backups/
-DRIVE_BACKUP_FOLDER="${DRIVE_BACKUP_FOLDER:-knowledge-log-backups}"
-RCLONE_DEST="gdrive:${DRIVE_BACKUP_FOLDER}"
+# Dumps older than this are deleted after each successful upload.
+RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-90}"
 
 if ! command -v rclone >/dev/null 2>&1; then
-  echo "backup.sh: rclone is not installed (apt install rclone)" >&2
+  echo "backup.sh: rclone is not installed (brew install rclone / apt install rclone)" >&2
   exit 1
 fi
 
-if [[ -n "${RCLONE_CONFIG_B64:-}" ]]; then
-  mkdir -p "${HOME}/.config/rclone"
-  if ! echo "$RCLONE_CONFIG_B64" | tr -d '\n\r\t ' | base64 -d >"${HOME}/.config/rclone/rclone.conf"; then
-    echo "backup.sh: failed to decode RCLONE_CONFIG_B64 (re-create with: base64 -w0 ~/.config/rclone/rclone.conf)" >&2
-    exit 1
-  fi
-  chmod 600 "${HOME}/.config/rclone/rclone.conf"
-fi
-
-if [[ ! -f "${HOME}/.config/rclone/rclone.conf" ]]; then
-  echo "backup.sh: no rclone config (~/.config/rclone/rclone.conf or RCLONE_CONFIG_B64)" >&2
-  exit 1
-fi
+# An rclone remote named "backups", defined by environment variables instead of rclone.conf.
+export RCLONE_CONFIG_BACKUPS_TYPE=s3
+export RCLONE_CONFIG_BACKUPS_PROVIDER=Cloudflare
+export RCLONE_CONFIG_BACKUPS_ENDPOINT="$R2_ENDPOINT_URL"
+export RCLONE_CONFIG_BACKUPS_ACCESS_KEY_ID="$BACKUP_R2_ACCESS_KEY_ID"
+export RCLONE_CONFIG_BACKUPS_SECRET_ACCESS_KEY="$BACKUP_R2_SECRET_ACCESS_KEY"
+# A bucket-scoped token can't list or create buckets, which rclone otherwise tries first.
+export RCLONE_CONFIG_BACKUPS_NO_CHECK_BUCKET=true
+RCLONE_DEST="backups:${BACKUP_R2_BUCKET}/postgres"
 
 STAMP="$(date -u +%Y-%m-%dT%H%M%SZ)"
-BACKUP_FILE="/tmp/knowledge-log-${STAMP}.sql.gz"
+BACKUP_FILE="$(mktemp -d)/knowledge-log-${STAMP}.sql.gz"
+trap 'rm -rf "$(dirname "$BACKUP_FILE")"' EXIT
 
 echo "backup.sh: dumping ${POSTGRES_DB} as ${BACKUP_FILE}"
 "${COMPOSE[@]}" exec -T postgres \
   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --no-acl | gzip >"$BACKUP_FILE"
 
 echo "backup.sh: uploading to ${RCLONE_DEST}/"
-rclone mkdir "${RCLONE_DEST}" 2>/dev/null || true
-rclone copy "$BACKUP_FILE" "${RCLONE_DEST}/" --log-level INFO
+rclone copy "$BACKUP_FILE" "${RCLONE_DEST}/" --log-level NOTICE
 
-rm -f "$BACKUP_FILE"
+echo "backup.sh: removing dumps older than ${RETENTION_DAYS} days"
+rclone delete "${RCLONE_DEST}/" --min-age "${RETENTION_DAYS}d" --log-level NOTICE
+
 echo "backup.sh: done (${STAMP})"

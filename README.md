@@ -43,7 +43,7 @@ cd pipeline && uv sync --extra reels && uv run kl mcq start
 
 ## Deployment
 
-Docker multistage images, GitHub Actions CI/CD, Postgres backed up to Google Drive, reel
+Docker multistage images, GitHub Actions CI/CD, Postgres backed up to Cloudflare R2, reel
 media on Cloudflare R2, behind an nginx + oauth2-proxy (Google SSO) edge. Full runbook:
 [`deploy/HOSTINGER.md`](deploy/HOSTINGER.md).
 
