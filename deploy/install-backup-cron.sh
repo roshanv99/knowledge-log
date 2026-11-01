@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Install the daily midnight (IST) database backup to R2 in the current user's own crontab.
-# Run on the Hostinger host (once, or automatically after each deploy) — no root needed. The
-# `deploy` user this runs as in CI has no sudo (by design, see api-gateway-2/CLAUDE.md), so
-# this uses `crontab`, not /etc/cron.d (which only root can write).
+# Run on the server (automatically after each deploy, or by hand) — no root needed, so this
+# uses the user's own `crontab`, not /etc/cron.d. On the macOS home server that works over SSH
+# only because Remote Login has "Allow full disk access for remote users" on; without it,
+# `crontab -` fails with "Operation not permitted".
 
 set -euo pipefail
 
@@ -17,8 +18,8 @@ if [[ ! -f "${DEPLOY_PATH}/deploy/backup.sh" ]]; then
   exit 1
 fi
 
-# Times are UTC: the server's cron (Debian/Ubuntu vixie cron) ignores CRON_TZ, so a CRON_TZ
-# line would silently do nothing. 18:30 UTC = 00:00 IST.
+# Times are UTC: the home server's clock is set to UTC, and cron ignores CRON_TZ, so a
+# CRON_TZ line would silently do nothing. 18:30 UTC = 00:00 IST.
 LOG_DIR="${HOME}/logs"
 LOG_FILE="${LOG_DIR}/knowledge-log-backup.log"
 MARKER="# knowledge-log-backup (managed by deploy/install-backup-cron.sh — do not edit by hand)"

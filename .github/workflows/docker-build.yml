@@ -6,7 +6,8 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Same arch as production (the arm64 home server), so a PR proves the image that ships.
+    runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
         context: [backend, ui]

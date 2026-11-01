@@ -10,7 +10,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # The home server (MacBook Air M2) runs arm64. GitHub's arm runners build natively —
+    # several times faster than QEMU emulation on an x86 runner (free for public repos).
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
@@ -24,11 +26,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      # arm64 is what the home server (MacBook Air M2) runs; amd64 keeps the Hostinger VPS
-      # deployable until it's retired.
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -44,7 +41,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/arm64
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:latest
@@ -53,21 +50,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    env:
-      # Set once the app lives on the home server, which is reachable only over Tailscale.
-      # Unset (Hostinger, public IP), the tailnet step is skipped.
-      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Join the tailnet
-        if: env.TS_OAUTH_CLIENT_ID != ''
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
 
       - name: Validate deploy secrets
         env:
@@ -75,9 +60,11 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_USER: ${{ secrets.SSH_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
         run: |
           missing=()
-          for name in SSH_PRIVATE_KEY SSH_HOST SSH_USER DEPLOY_PATH; do
+          for name in SSH_PRIVATE_KEY SSH_HOST SSH_USER DEPLOY_PATH TS_OAUTH_CLIENT_ID TS_OAUTH_SECRET; do
             eval "value=\${$name}"
             if [ -z "$value" ]; then
               missing+=("$name")
@@ -85,9 +72,18 @@ jobs:
           done
           if [ "${#missing[@]}" -gt 0 ]; then
             echo "Missing GitHub Actions secrets: ${missing[*]}"
-            echo "Add them under Settings → Secrets and variables → Actions (see deploy/HOSTINGER.md)."
+            echo "Add them under Settings → Secrets and variables → Actions (see deploy/HOMESERVER.md)."
             exit 1
           fi
+
+      # The home server has no public SSH: the runner joins the tailnet as tag:ci, which the
+      # Tailscale ACL lets reach tag:homeserver:22 and nothing else.
+      - name: Join the tailnet
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
 
       - name: Configure SSH
         env:
@@ -129,17 +125,3 @@ jobs:
           ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             "${SSH_USER}@${SSH_HOST}" \
             "export DEPLOY_PATH='${DEPLOY_PATH}' CI_DEPLOY_DIR=/tmp/knowledge-log-ci-deploy && cd '${DEPLOY_PATH}' && bash /tmp/knowledge-log-ci-deploy/ci-deploy.sh"
-
-      # Refresh the shared edge proxy (roshanv99/api-gateway-2) over the same SSH session
-      # that just deployed this app — see ~/Projects/api-gateway's log-book precedent for why
-      # this goes over SSH rather than a cross-repo repository_dispatch (no extra PAT to issue).
-      # Only Hostinger has that proxy; on the home server cloudflared routes by alias and needs
-      # no refresh. Drop this step once Hostinger is retired.
-      - name: Refresh the shared gateway
-        env:
-          SSH_HOST: ${{ secrets.SSH_HOST }}
-          SSH_USER: ${{ secrets.SSH_USER }}
-        run: |
-          ssh -4 -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
-            "${SSH_USER}@${SSH_HOST}" \
-            "if [ -d /opt/hostinger-api-gateway ]; then export DEPLOY_PATH=/opt/hostinger-api-gateway && bash /opt/hostinger-api-gateway/deploy/ci-deploy.sh; else echo 'no gateway on this host (home server: cloudflared routes by alias)'; fi"

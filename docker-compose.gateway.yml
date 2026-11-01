@@ -1,5 +1,5 @@
-# Docker + Google SSO, fronted by the shared edge gateway (hostinger-api-gateway) or, for
-# local testing, run directly. See deploy/HOSTINGER.md.
+# Docker + Google SSO, fronted by the home server's cloudflared tunnel or, for local testing,
+# run directly. See deploy/HOMESERVER.md.
 #
 #   cp deploy/env.example .env
 #   cp deploy/oauth2-proxy.env.example deploy/oauth2-proxy.env
@@ -26,8 +26,8 @@ services:
     networks:
       edge:
       internal:
-      # Shared with the hostinger-api-gateway project, which owns :80/:443 on this host.
-      # The alias is the name its nginx proxy_passes to, so it stays stable no matter what
+      # Shared with the home server's cloudflared (roshanv99/home-server). The alias is what
+      # the tunnel route targets (http://knowledgelog:80), so it stays stable no matter what
       # compose names this container.
       gateway:
         aliases:
@@ -44,9 +44,9 @@ services:
     restart: unless-stopped
 
 networks:
-  # Created once on the host with `docker network create gateway`, shared by every app
-  # behind the edge proxy. Declared external so neither this project nor the gateway owns
-  # its lifecycle.
+  # Created once on the host with `docker network create gateway` (home-server's setup.sh),
+  # shared by every app and the cloudflared edge. Declared external so no single project
+  # owns its lifecycle.
   gateway:
     external: true
     name: gateway

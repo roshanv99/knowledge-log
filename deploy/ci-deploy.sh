@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Remote deploy entrypoint: backup → git pull → pull images from GHCR → migrate.
-# Invoked from GitHub Actions over SSH (see .github/workflows/deploy-production.yml).
+# Invoked from GitHub Actions over SSH via Tailscale (see .github/workflows/deploy-production.yml).
 #
 # CI builds and pushes the images; this script never builds anything — it only pulls, the
-# same convention as every other app on this box (see deploy/HOSTINGER.md).
+# same convention as every other app on the home server (see deploy/HOMESERVER.md).
+# Runs under macOS's bash 3.2 and BSD tools there: no mapfile, no `sed -i` without '', no `date -d`.
 
 set -euo pipefail
 

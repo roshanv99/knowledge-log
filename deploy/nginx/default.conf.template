@@ -5,9 +5,10 @@
 # ui image (see ui/Dockerfile) — the SPA build is baked in at /usr/share/nginx/html, so
 # static assets are served from disk here rather than proxied to a separate web container.
 #
-# This server does not face the internet directly: the shared "hostinger-api-gateway" repo
-# terminates TLS and proxies here in plain HTTP over the external `gateway` docker network
-# (see docker-compose.gateway.yml). Hence "listen 80" with no redirect/cert of its own.
+# This server does not face the internet directly: Cloudflare terminates TLS, and the home
+# server's cloudflared tunnel proxies here in plain HTTP over the external `gateway` docker
+# network, by the alias `knowledgelog` (see docker-compose.gateway.yml). Hence "listen 80"
+# with no redirect/cert of its own.
 
 map $http_x_forwarded_proto $external_proto {
   default $http_x_forwarded_proto;

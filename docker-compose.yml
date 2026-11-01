@@ -3,8 +3,8 @@
 # pipeline read) for both compose variable substitution and container environment.
 #
 #   Local Docker + Google SSO:  docker compose -f docker-compose.yml -f docker-compose.gateway.yml up --build
-#   Production (Hostinger):     same gateway file, no --build — CI pushes images to GHCR and
-#                                the server only pulls. See deploy/HOSTINGER.md.
+#   Production (home server):   same gateway file, no --build — CI pushes images to GHCR and
+#                                the server only pulls. See deploy/HOMESERVER.md.
 #
 # Every image-backed service below carries both `build:` (so local dev's `--build` still
 # works from source) and `image:` (what production pulls, and what `--build` tags the
